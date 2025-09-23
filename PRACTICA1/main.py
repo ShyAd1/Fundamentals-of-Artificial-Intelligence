@@ -2,12 +2,12 @@ import pygame
 import funciones
 import interfaces
 
-screen_width, screen_height = 1000, 600
+screen_width, screen_height = 1000, 640
 
 # Inicializar Pygame
 pygame.init()
 screen = pygame.display.set_mode((screen_width, screen_height))
-pygame.display.set_caption("Mi Juego")
+pygame.display.set_caption("Laberinto Interactivo")
 
 # Leer datos de un archivo CSV
 datos = funciones.leer_archivo_csv("PRACTICA1/laberinto.csv")
@@ -123,8 +123,14 @@ while running:
                 seleccionando_personaje = True
                 globals()["seleccionando_personaje"] = True
             else:
-                col = x // 40
-                fila = y // 40
+                # Ajustar por encabezados (desplazamiento de 40px)
+                if x < 40 or y < 40:
+                    # Click en encabezado, ignorar
+                    continue
+                col = (x - 40) // 40
+                fila = (y - 40) // 40
+                if col < 0 or fila < 0 or col >= len(columnas) or fila >= len(datos):
+                    continue
                 nombre_col = columnas[col] if col < len(columnas) else col
                 if modificar_mapa:
                     # Flip cell value and save
@@ -297,14 +303,31 @@ while running:
     else:
         mostrar_celda = lambda i, j: True
 
+    # Dibujar encabezados de columna (A, B, ...) y fila (1, 2, ...)
+    header_font = pygame.font.Font(None, 24)
+    for j in range(len(columnas)):
+        col_text = header_font.render(columnas[j], True, (255, 255, 255))
+        # Centrar en la celda de encabezado
+        x = j * 40 + 40 + (40 - col_text.get_width()) // 2
+        y = (40 - col_text.get_height()) // 2
+        screen.blit(col_text, (x, y))
+    for i in range(len(datos)):
+        row_text = header_font.render(str(i + 1), True, (255, 255, 255))
+        x = (40 - row_text.get_width()) // 2
+        y = i * 40 + 40 + (40 - row_text.get_height()) // 2
+        screen.blit(row_text, (x, y))
+
+    # Dibujar celdas con desplazamiento por encabezados
     for i, fila in enumerate(datos):
         for j, columna in enumerate(fila):
             if mostrar_celda(i, j):
+                x = j * 40 + 40
+                y = i * 40 + 40
                 if columna == "1":
-                    color = (255, 255, 255)  # Blanco para caminos o celdas validas
+                    color = (255, 255, 255)
                 else:
-                    color = (74, 74, 74)  # Gris para paredes o celdas inválidas
-                pygame.draw.rect(screen, color, (j * 40, i * 40, 40, 40))
+                    color = (74, 74, 74)
+                pygame.draw.rect(screen, color, (x, y, 40, 40))
                 # Dibujar valores especiales si existen en recorridos
                 if (
                     0 <= i < len(recorridos)
@@ -341,13 +364,10 @@ while running:
                                 letra_surface = letra_font.render(
                                     letra, True, letra_color
                                 )
-                                screen.blit(
-                                    letra_surface, (j * 40 + 5 + x_offset, i * 40 + 12)
-                                )
+                                screen.blit(letra_surface, (x + 5 + x_offset, y + 12))
                                 x_offset += letra_surface.get_width() + 2
                 else:
-                    # Cubrir celda con gris si no es camino
-                    pygame.draw.rect(screen, color, (j * 40, i * 40, 40, 40))
+                    pygame.draw.rect(screen, color, (x, y, 40, 40))
 
     # Movimiento del personaje con teclas
     if personaje_seleccionado:
@@ -448,10 +468,10 @@ while running:
                             break
 
     # Dibujar grid
-    for x in range(0, 600, 40):
-        pygame.draw.line(screen, (128, 128, 128), (x, 0), (x, 600))
-    for y in range(0, 600, 40):
-        pygame.draw.line(screen, (128, 128, 128), (0, y), (600, y))
+    for x in range(0, 640, 40):
+        pygame.draw.line(screen, (128, 128, 128), (x, 0), (x, 640))
+    for y in range(0, 640, 40):
+        pygame.draw.line(screen, (128, 128, 128), (0, y), (640, y))
 
     # Dibujar botón Modificar mapa
     interfaces.dibujar_boton(screen, boton_rect, (70, 130, 180), texto_surface)
