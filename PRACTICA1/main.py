@@ -21,6 +21,14 @@ copy_recorridos = [fila[:] for fila in recorridos]
 num_columnas = len(datos[0]) if datos else 0
 columnas = [chr(ord("A") + i) for i in range(num_columnas)]
 
+costos_personaje = {
+    "Humano": 1,
+    "Mono": 2,
+    "Pulpo": 3,
+    "Sasquatch": 4,
+}
+costo_total = 0
+
 # Bucle principal del juego
 running = True
 while running:
@@ -36,9 +44,8 @@ while running:
     cubrir_rect = pygame.Rect(cubrir_x, cubrir_y, cubrir_width, cubrir_height)
 
     # Botón para seleccionar personaje
-    personajes = [("Humano", 1), ("Mono", 1), ("Pulpo", 1), ("Sasquatch", 1)]
+    personajes = ["Humano", "Mono", "Pulpo", "Sasquatch"]
     personaje_seleccionado = globals().get("personaje_seleccionado", None)
-    pasos_personaje = globals().get("pasos_personaje", None)
     seleccionando_personaje = globals().get("seleccionando_personaje", False)
     personaje_texto = (
         f"Personaje: {personaje_seleccionado if personaje_seleccionado else 'Escoger'}"
@@ -233,7 +240,12 @@ while running:
         menu_w = 260
         menu_h = 220
         interfaces.dibujar_menu_personaje(
-            screen, menu_x, menu_y, menu_w, menu_h, personajes
+            screen,
+            menu_x,
+            menu_y,
+            menu_w,
+            menu_h,
+            [(nombre, costos_personaje[nombre]) for nombre in personajes],
         )
         pygame.display.flip()
         menu_open = True
@@ -244,16 +256,14 @@ while running:
                     menu_open = False
                 elif e.type == pygame.MOUSEBUTTONDOWN:
                     mx, my = e.pos
-                    for idx, (nombre, pasos) in enumerate(personajes):
+                    for idx, nombre in enumerate(personajes):
                         btn_rect = pygame.Rect(
                             menu_x + 20, menu_y + 20 + idx * 40, 180, 36
                         )
                         if btn_rect.collidepoint(mx, my):
                             personaje_seleccionado = nombre
-                            pasos_personaje = pasos
                             seleccionando_personaje = False
                             globals()["personaje_seleccionado"] = personaje_seleccionado
-                            globals()["pasos_personaje"] = pasos_personaje
                             globals()["seleccionando_personaje"] = False
                             menu_open = False
                             break
@@ -293,7 +303,7 @@ while running:
                 if columna == "1":
                     color = (255, 255, 255)  # Blanco para caminos o celdas validas
                 else:
-                    color = (0, 0, 0)  # Negro para paredes o celdas inválidas
+                    color = (74, 74, 74)  # Gris para paredes o celdas inválidas
                 pygame.draw.rect(screen, color, (j * 40, i * 40, 40, 40))
                 # Dibujar valores especiales si existen en recorridos
                 if (
@@ -312,18 +322,18 @@ while running:
                         for letra in val:
                             if letra in valores_lista:
                                 letra_color = (
-                                    (255, 215, 0)
+                                    (150, 0, 0)
                                     if letra == "I"
                                     else (
-                                        (0, 255, 0)
+                                        (0, 0, 0)
                                         if letra == "F"
                                         else (
                                             (70, 130, 180)
                                             if letra == "O"
                                             else (
-                                                (255, 0, 0)
+                                                (110, 0, 150)
                                                 if letra == "X"
-                                                else (200, 200, 200)
+                                                else (0, 100, 20)
                                             )
                                         )
                                     )
@@ -336,11 +346,11 @@ while running:
                                 )
                                 x_offset += letra_surface.get_width() + 2
                 else:
-                    # Cubrir celda con negro
-                    pygame.draw.rect(screen, (0, 0, 0), (j * 40, i * 40, 40, 40))
+                    # Cubrir celda con gris si no es camino
+                    pygame.draw.rect(screen, color, (j * 40, i * 40, 40, 40))
 
     # Movimiento del personaje con teclas
-    if personaje_seleccionado and pasos_personaje:
+    if personaje_seleccionado:
         # Buscar posición actual (X) o inicio (I)
         pos_actual = None
         for i in range(len(recorridos)):
@@ -384,26 +394,19 @@ while running:
                 elif event.key == pygame.K_d or event.key == pygame.K_RIGHT:
                     dx, dy = 0, 1
                 if dx != 0 or dy != 0:
-                    # Validar todas las casillas intermedias antes de mover
-                    ni, nj = pos_actual[0], pos_actual[1]
-                    puede_mover = True
-                    for paso in range(1, pasos_personaje + 1):
-                        ni_temp = pos_actual[0] + dx * paso
-                        nj_temp = pos_actual[1] + dy * paso
-                        if (
-                            0 <= ni_temp < len(datos)
-                            and 0 <= nj_temp < len(datos[0])
-                            and datos[ni_temp][nj_temp] == "1"
-                        ):
-                            ni, nj = ni_temp, nj_temp
-                        else:
-                            puede_mover = False
-                            break
-                    # Solo mover si todas las casillas son camino y hay movimiento
-                    if puede_mover and (ni, nj) != pos_actual:
+                    ni = pos_actual[0] + dx
+                    nj = pos_actual[1] + dy
+                    if (
+                        0 <= ni < len(datos)
+                        and 0 <= nj < len(datos[0])
+                        and datos[ni][nj] == "1"
+                    ):
+                        costo_mov = 0
+                        # Sumar costo si la casilla destino tiene 'V' (ya visitada)
+                        if "V" in recorridos[ni][nj]:
+                            costo_mov = costos_personaje.get(personaje_seleccionado, 1)
                         # Marcar anterior como V
                         val_ant = recorridos[pos_actual[0]][pos_actual[1]]
-                        # Solo un V por casilla, los demás valores pueden coexistir
                         nuevo_val_ant = ""
                         if "V" not in val_ant:
                             nuevo_val_ant = "V"
@@ -421,17 +424,27 @@ while running:
                         funciones.guardar_archivo_csv(
                             "PRACTICA1/recorridos.csv", recorridos
                         )
-                        # Si llegó a F, mostrar mensaje y reiniciar mapa
+                        costo_total += costo_mov
+                        # Si llegó a F, calcular costo por cantidad de V's
                         if "F" in nuevo_val_nueva:
-                            interfaces.mostrar_mensaje("¡Llegaste a la meta!", screen)
+                            # Contar todas las V en recorridos
+                            v_count = sum(fila.count("V") for fila in recorridos)
+                            peso = costos_personaje.get(personaje_seleccionado, 1)
+                            costo_final = (
+                                v_count + 2
+                            ) * peso  # +2 por el movimiento de la casilla anterior a F y la F
+                            interfaces.mostrar_mensaje(
+                                f"¡Llegaste a la meta!     Costo total: {costo_final}",
+                                screen,
+                            )
                             recorridos = funciones.leer_archivo_csv(
                                 "PRACTICA1/recorridos.csv"
                             )
-                            # Restaurar recorrido original
                             funciones.guardar_archivo_csv(
                                 "PRACTICA1/recorridos.csv", copy_recorridos
                             )
                             recorridos = [fila[:] for fila in copy_recorridos]
+                            costo_total = 0
                             break
 
     # Dibujar grid
