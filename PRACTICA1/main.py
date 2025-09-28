@@ -428,10 +428,31 @@ while running:
                         # Marcar anterior como V
                         val_ant = recorridos[pos_actual[0]][pos_actual[1]]
                         nuevo_val_ant = ""
+                        
+                        # Agregar V solo si no está presente
                         if "V" not in val_ant:
-                            nuevo_val_ant = "V"
+                            nuevo_val_ant += "V"
+
+                        # Marcar la casilla O si es de decision en base si tiene 1 vecino V y tiene mas de 2 vecinos caminos
+                        # Solo agregar O si no está presente
+                        if "O" not in val_ant:
+                            vecinos_v = 0
+                            vecinos_c = 0
+                            for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                                xi, yj = pos_actual[0] + di, pos_actual[1] + dj
+                                if 0 <= xi < len(recorridos) and 0 <= yj < len(
+                                    recorridos[0]
+                                ):
+                                    if recorridos[xi][yj] and "V" in recorridos[xi][yj]:
+                                        vecinos_v += 1
+                                    if datos[xi][yj] == "1":
+                                        vecinos_c += 1
+                            if vecinos_v == 1 and vecinos_c > 2:
+                                nuevo_val_ant += "O"
+
+                        # Preservar otros valores especiales (excepto X)
                         for letra in val_ant:
-                            if letra in valores_lista and letra != "X":
+                            if letra in valores_lista and letra != "X" and letra not in nuevo_val_ant:
                                 nuevo_val_ant += letra
                         recorridos[pos_actual[0]][pos_actual[1]] = nuevo_val_ant
                         # Marcar nueva posición como X
