@@ -81,16 +81,34 @@ def cargar_laberinto():
 
 
 def cargar_terreno():
-    global datos, recorridos, modo_mapa, marcas_terreno, costo_acumulado
+    global datos, recorridos, modo_mapa, copy_recorridos, costo_acumulado, recorridos_inicial
     datos = funciones.leer_archivo_csv("PRACTICA1/terreno.csv")
-    recorridos = []
-    marcas_terreno = [["" for _ in fila[:15]] for fila in datos[:15]]
+    # Cargar marcas/recorridos de terreno desde archivo (archivo esperado: recorridos_terreno.csv)
+    # Guardamos en la variable marcas_terreno (y también en 'recorridos' para compatibilidad)
+    marcas = []
+    try:
+        marcas = funciones.leer_archivo_csv("PRACTICA1/recorridos_terreno.csv")
+    except FileNotFoundError:
+        # Crear estructura vacía compatible (15x15)
+        marcas = [["" for _ in range(15)] for __ in range(15)]
+    # Asegurar dimensiones 15x15
+    marcas_terreno_local = [
+        [
+            (marcas[i][j] if j < len(marcas[i]) else "") if i < len(marcas) else ""
+            for j in range(15)
+        ]
+        for i in range(15)
+    ]
+    globals()["marcas_terreno"] = marcas_terreno_local
+    recorridos = marcas_terreno_local
+    if recorridos_inicial is None:
+        recorridos_inicial = [fila[:] for fila in recorridos]
+    copy_recorridos = [fila[:] for fila in recorridos]
     modo_mapa = "terreno"
     costo_acumulado = 0
     globals()["costo_acumulado"] = costo_acumulado
     reset_estado_descubrimiento()
     globals()["modo_mapa"] = modo_mapa
-    globals()["marcas_terreno"] = marcas_terreno
 
 
 # Cargar costos de personajes para terreno
@@ -238,6 +256,47 @@ def abrir_menu_personaje(
                                                     "PRACTICA1/recorridos.csv",
                                                     recorridos,
                                                 )
+                                                # Actualizar snapshot y recorridos_inicial
+                                                try:
+                                                    # Crear copia limpia sin V/O
+                                                    clean = [
+                                                        [
+                                                            "".join(
+                                                                [
+                                                                    c
+                                                                    for c in (
+                                                                        recorridos[ii][
+                                                                            jj
+                                                                        ]
+                                                                        if recorridos[
+                                                                            ii
+                                                                        ][jj]
+                                                                        else ""
+                                                                    )
+                                                                    if c
+                                                                    not in ("V", "O")
+                                                                ]
+                                                            )
+                                                            for jj in range(
+                                                                len(recorridos[0])
+                                                            )
+                                                        ]
+                                                        for ii in range(len(recorridos))
+                                                    ]
+                                                    copy_recorridos = [
+                                                        fila[:] for fila in clean
+                                                    ]
+                                                    recorridos_inicial = [
+                                                        fila[:] for fila in recorridos
+                                                    ]
+                                                    globals()[
+                                                        "copy_recorridos"
+                                                    ] = copy_recorridos
+                                                    globals()[
+                                                        "recorridos_inicial"
+                                                    ] = recorridos_inicial
+                                                except Exception:
+                                                    pass
                                                 descubrir_alrededor(
                                                     descubiertas_laberinto, i, j
                                                 )
@@ -446,11 +505,7 @@ while running:
                                 )
                                 actual = recorridos[ni][nj]
                                 # Marcar visita
-                                if (
-                                    "I" not in actual
-                                    and "F" not in actual
-                                    and "X" not in actual
-                                ):
+                                if "X" not in actual:
                                     if "V" not in actual:
                                         recorridos[ni][nj] = (actual or "") + "V"
                                 # Quitar X anterior
@@ -493,6 +548,33 @@ while running:
                                 funciones.guardar_archivo_csv(
                                     "PRACTICA1/recorridos.csv", recorridos
                                 )
+                                # Actualizar snapshot tras modificación del mapa (usar versión limpia sin V/O)
+                                try:
+                                    clean = [
+                                        [
+                                            "".join(
+                                                [
+                                                    c
+                                                    for c in (
+                                                        recorridos[i][j]
+                                                        if recorridos[i][j]
+                                                        else ""
+                                                    )
+                                                    if c not in ("V", "O")
+                                                ]
+                                            )
+                                            for j in range(len(recorridos[0]))
+                                        ]
+                                        for i in range(len(recorridos))
+                                    ]
+                                    copy_recorridos = [fila[:] for fila in clean]
+                                    recorridos_inicial = [
+                                        fila[:] for fila in recorridos
+                                    ]
+                                    globals()["copy_recorridos"] = copy_recorridos
+                                    globals()["recorridos_inicial"] = recorridos_inicial
+                                except Exception:
+                                    pass
                                 descubrir_alrededor(descubiertas_laberinto, ni, nj)
                                 # Si llego a F reset
                                 if "F" in recorridos[ni][nj]:
@@ -516,6 +598,7 @@ while running:
                                             ):
                                                 if "X" not in recorridos[i_r][j_r]:
                                                     recorridos[i_r][j_r] += "X"
+
                                                 funciones.guardar_archivo_csv(
                                                     "PRACTICA1/recorridos.csv",
                                                     recorridos,
@@ -524,9 +607,9 @@ while running:
                                                     descubiertas_laberinto, i_r, j_r
                                                 )
                                                 break
-                                        else:
-                                            continue
-                                        break
+                                            else:
+                                                continue
+                                            break
                     elif modo_mapa == "terreno":
                         pos_t = globals().get("pos_terreno", None)
                         if pos_t:
@@ -547,30 +630,102 @@ while running:
                                         globals().get("costo_acumulado", 0)
                                         + costos_terreno[personaje_seleccionado][tipo]
                                     )
+                                    # Marcar visita en marcas_terreno (similar a laberinto pero en terreno abierto)
+                                    marcas = globals().get("marcas_terreno", None)
+                                    if (
+                                        marcas is not None
+                                        and 0 <= ni < len(marcas)
+                                        and 0 <= nj < len(marcas[0])
+                                    ):
+                                        actual = marcas[ni][nj] or ""
+                                        # Añadir V si no existe
+                                        if "X" not in actual:
+                                            if "V" not in actual:
+                                                marcas[ni][nj] = (actual or "") + "V"
+                                        # Quitar X anterior
+                                        for i_r in range(min(15, len(marcas))):
+                                            for j_r in range(min(15, len(marcas[0]))):
+                                                if (
+                                                    marcas[i_r][j_r]
+                                                    and "X" in marcas[i_r][j_r]
+                                                ):
+                                                    marcas[i_r][j_r] = marcas[i_r][
+                                                        j_r
+                                                    ].replace("X", "")
+                                        # Poner X en la celda actual si no existe
+                                        if "X" not in marcas[ni][nj]:
+                                            marcas[ni][nj] = (
+                                                marcas[ni][nj] or ""
+                                            ) + "X"
+                                        # Guardar cambios en archivo
+                                        try:
+                                            funciones.guardar_archivo_csv(
+                                                "PRACTICA1/recorridos_terreno.csv",
+                                                marcas,
+                                            )
+                                        except Exception:
+                                            pass
                                     descubrir_alrededor(descubiertas_terreno, ni, nj)
-                                    # Reset si llega a F
+                                    # Reset si llega a F (comportamiento igual al laberinto)
                                     if marcas_terreno and "F" in (
                                         marcas_terreno[ni][nj] or ""
                                     ):
+                                        # Restaurar estado inicial desde snapshot copy_recorridos
+                                        if (
+                                            "copy_recorridos" in globals()
+                                            and copy_recorridos
+                                        ):
+                                            for i_r in range(len(marcas_terreno)):
+                                                for j_r in range(
+                                                    len(marcas_terreno[0])
+                                                ):
+                                                    marcas_terreno[i_r][j_r] = (
+                                                        copy_recorridos[i_r][j_r]
+                                                    )
+                                            # Guardar en CSV
+                                            try:
+                                                funciones.guardar_archivo_csv(
+                                                    "PRACTICA1/recorridos_terreno.csv",
+                                                    marcas_terreno,
+                                                )
+                                            except Exception:
+                                                pass
                                         globals()["costo_acumulado"] = 0
                                         reset_estado_descubrimiento()
-                                        # Reposicionar en I si existe
-                                        start_found = False
-                                        for i_r in range(len(marcas_terreno)):
-                                            for j_r in range(len(marcas_terreno[0])):
-                                                if "I" in marcas_terreno[i_r][j_r]:
+                                        # Reposicionar X en I (si existe) similar al laberinto
+                                        for i_r in range(min(15, len(marcas_terreno))):
+                                            for j_r in range(
+                                                min(15, len(marcas_terreno[0]))
+                                            ):
+                                                if (
+                                                    marcas_terreno[i_r][j_r]
+                                                    and "I" in marcas_terreno[i_r][j_r]
+                                                ):
+                                                    if (
+                                                        "X"
+                                                        not in marcas_terreno[i_r][j_r]
+                                                    ):
+                                                        marcas_terreno[i_r][j_r] += "X"
+                                                    try:
+                                                        funciones.guardar_archivo_csv(
+                                                            "PRACTICA1/recorridos_terreno.csv",
+                                                            marcas_terreno,
+                                                        )
+                                                    except Exception:
+                                                        pass
+                                                    descubrir_alrededor(
+                                                        descubiertas_terreno, i_r, j_r
+                                                    )
                                                     globals()["pos_terreno"] = (
                                                         i_r,
                                                         j_r,
                                                     )
-                                                    descubrir_alrededor(
-                                                        descubiertas_terreno, i_r, j_r
-                                                    )
-                                                    start_found = True
                                                     break
-                                            if start_found:
-                                                break
-                                        if not start_found:
+                                            else:
+                                                continue
+                                            break
+                                        else:
+                                            # No se encontró I, reposicionar en (0,0)
                                             globals()["pos_terreno"] = (0, 0)
                                             descubrir_alrededor(
                                                 descubiertas_terreno, 0, 0
@@ -891,6 +1046,55 @@ while running:
                                                         "PRACTICA1/recorridos.csv",
                                                         recorridos,
                                                     )
+                                                    # Actualizar snapshot (copy_recorridos) para que el reset use la última modificación
+                                                    try:
+                                                        # Crear copia limpia quitando marcas transitorias V y O
+                                                        clean = [
+                                                            [
+                                                                "".join(
+                                                                    [
+                                                                        c
+                                                                        for c in (
+                                                                            recorridos[
+                                                                                i
+                                                                            ][j]
+                                                                            if recorridos[
+                                                                                i
+                                                                            ][
+                                                                                j
+                                                                            ]
+                                                                            else ""
+                                                                        )
+                                                                        if c
+                                                                        not in (
+                                                                            "V",
+                                                                            "O",
+                                                                        )
+                                                                    ]
+                                                                )
+                                                                for j in range(
+                                                                    len(recorridos[0])
+                                                                )
+                                                            ]
+                                                            for i in range(
+                                                                len(recorridos)
+                                                            )
+                                                        ]
+                                                        copy_recorridos = [
+                                                            fila[:] for fila in clean
+                                                        ]
+                                                        recorridos_inicial = [
+                                                            fila[:]
+                                                            for fila in recorridos
+                                                        ]
+                                                        globals()[
+                                                            "copy_recorridos"
+                                                        ] = copy_recorridos
+                                                        globals()[
+                                                            "recorridos_inicial"
+                                                        ] = recorridos_inicial
+                                                    except Exception:
+                                                        pass
                                                     seleccionando_v = False
                                                     break
                                             if not seleccionando_v:
@@ -902,7 +1106,6 @@ while running:
                                             seleccionando_v = False
                                             break
                         elif modo_valores:
-                            # Ahora también aplica a terreno
                             if modo_mapa == "laberinto":
                                 if datos[fila][col] == "1" and recorridos:
                                     # reutilizar menú laberinto para recorridos
@@ -1100,6 +1303,68 @@ while running:
                                                     marcas_terreno[fila][
                                                         col
                                                     ] = celda_ord
+                                                    # Guardar cambios en archivo de recorridos de terreno
+                                                    try:
+                                                        funciones.guardar_archivo_csv(
+                                                            "PRACTICA1/recorridos_terreno.csv",
+                                                            marcas_terreno,
+                                                        )
+                                                    except Exception:
+                                                        pass
+                                                    # Actualizar snapshot (copy_recorridos) y recorridos_inicial
+                                                    try:
+                                                        clean = [
+                                                            [
+                                                                "".join(
+                                                                    [
+                                                                        c
+                                                                        for c in (
+                                                                            marcas_terreno[
+                                                                                i
+                                                                            ][
+                                                                                j
+                                                                            ]
+                                                                            if marcas_terreno[
+                                                                                i
+                                                                            ][
+                                                                                j
+                                                                            ]
+                                                                            else ""
+                                                                        )
+                                                                        if c
+                                                                        not in (
+                                                                            "V",
+                                                                            "O",
+                                                                        )
+                                                                    ]
+                                                                )
+                                                                for j in range(
+                                                                    len(
+                                                                        marcas_terreno[
+                                                                            0
+                                                                        ]
+                                                                    )
+                                                                )
+                                                            ]
+                                                            for i in range(
+                                                                len(marcas_terreno)
+                                                            )
+                                                        ]
+                                                        copy_recorridos = [
+                                                            fila[:] for fila in clean
+                                                        ]
+                                                        recorridos_inicial = [
+                                                            fila[:]
+                                                            for fila in marcas_terreno
+                                                        ]
+                                                        globals()[
+                                                            "copy_recorridos"
+                                                        ] = copy_recorridos
+                                                        globals()[
+                                                            "recorridos_inicial"
+                                                        ] = recorridos_inicial
+                                                    except Exception:
+                                                        pass
                                                     seleccionando_t = False
                                                     break
                                             if not seleccionando_t:
