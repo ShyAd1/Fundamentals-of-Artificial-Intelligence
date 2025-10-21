@@ -1,6 +1,9 @@
 import pygame
 import funciones
 import interfaces
+import os
+import json
+import sys
 
 # Paletas y constantes (asegurar antes de funciones)
 COLOR_PARED = (74, 74, 74)
@@ -53,6 +56,14 @@ personajes = ["Humano", "Mono", "Pulpo", "Sasquatch"]
 
 # Nueva variable global para marcas de terreno
 marcas_terreno = globals().get("marcas_terreno", [])
+
+# Variables para animación de algoritmos
+alg_animating = globals().get("alg_animating", False)
+alg_current = globals().get("alg_current", None)
+alg_frontier = globals().get("alg_frontier", set())
+alg_path = globals().get("alg_path", set())
+alg_tree_edges = globals().get("alg_tree_edges", set())
+alg_path_seq = globals().get("alg_path_seq", [])
 
 # Nueva variable para mostrar celdas cubiertas
 mostrar_cubierto = globals().get("mostrar_cubierto", False)
@@ -196,6 +207,292 @@ def descubrir_alrededor(conjunto, fila, col):
         ni, nj = fila + di, col + dj
         if 0 <= ni < 15 and 0 <= nj < 15:
             conjunto.add((ni, nj))
+
+
+def aplicar_camino_en_recorridos(path):
+    # Marca V en cada paso (excepto I/F), limpia X anteriores y pone X en objetivo; guarda CSV
+    global recorridos, costo_acumulado
+    if not path:
+        return False
+    # Quitar X anterior
+    for i_r in range(min(15, len(recorridos))):
+        for j_r in range(min(15, len(recorridos[0]))):
+            if recorridos[i_r][j_r] and "X" in recorridos[i_r][j_r]:
+                recorridos[i_r][j_r] = recorridos[i_r][j_r].replace("X", "")
+    pasos = 0
+    for idx, (i, j) in enumerate(path):
+        actual = (
+            recorridos[i][j]
+            if recorridos and i < len(recorridos) and j < len(recorridos[0])
+            else ""
+        )
+        # No sobrescribir I o F
+        if "I" not in actual and "F" not in actual and "X" not in actual:
+            if "V" not in actual:
+                recorridos[i][j] = (actual or "") + "V"
+        pasos += 1
+        descubrir_alrededor(descubiertas_laberinto, i, j)
+    # Poner X en el último
+    li, lj = path[-1]
+    if "X" not in (recorridos[li][lj] or ""):
+        recorridos[li][lj] = (recorridos[li][lj] or "") + "X"
+    # Incrementar costo por pasos (cada movimiento 1)
+    globals()["costo_acumulado"] = globals().get("costo_acumulado", 0) + max(
+        0, pasos - 1
+    )
+    # Normalizar orden en todo el grid (I,F,V,O,X)
+    orden = {c: i for i, c in enumerate(["I", "F", "V", "O", "X"])}
+    for i_r in range(min(15, len(recorridos))):
+        for j_r in range(min(15, len(recorridos[0]))):
+            if recorridos[i_r][j_r]:
+                sorted_val = "".join(
+                    sorted(
+                        [c for c in recorridos[i_r][j_r] if c in orden],
+                        key=lambda c: orden[c],
+                    )
+                )
+                recorridos[i_r][j_r] = sorted_val
+    try:
+        funciones.guardar_archivo_csv("PRACTICA1/recorridos.csv", recorridos)
+    except Exception:
+        pass
+    return True
+
+
+# Versión animada de BFS que actualiza globals para que la UI muestre progreso
+def bfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
+    global alg_animating, alg_current, alg_frontier, alg_path, alg_tree_edges, alg_path_seq
+    from collections import deque
+
+    alg_animating = True
+    alg_current = None
+    alg_frontier = set()
+    alg_path = set()
+    globals()["alg_animating"] = alg_animating
+
+    si, sj = start
+    gi, gj = goal
+    visited = [[False] * len(datos_grid[0]) for _ in range(len(datos_grid))]
+    parent = {}
+    q = deque()
+    q.append((si, sj))
+    visited[si][sj] = True
+    found = False
+    # marcar inicio como descubierto (no marcar V sobre I)
+    globals()["alg_frontier"] = set(q)
+    # inicializar conjunto de aristas
+    alg_tree_edges = globals().get("alg_tree_edges", set())
+    alg_path_seq = globals().get("alg_path_seq", [])
+    while q:
+        i, j = q.popleft()
+        alg_current = (i, j)
+        alg_frontier = set(q)
+        globals()["alg_current"] = alg_current
+        globals()["alg_frontier"] = alg_frontier
+
+        # Marcar visitado en recorridos (excepto I/F/X)
+        try:
+            actual = recorridos[i][j] if recorridos and i < len(recorridos) else ""
+        except Exception:
+            actual = ""
+        if (
+            actual is not None
+            and "I" not in actual
+            and "F" not in actual
+            and "X" not in actual
+        ):
+            if "V" not in actual:
+                try:
+                    recorridos[i][j] = (actual or "") + "V"
+                except Exception:
+                    pass
+        descubrir_alrededor(descubiertas_laberinto, i, j)
+
+        # Actualizar UI
+        pygame.event.pump()
+        try:
+            render_frame(screen)
+        except Exception:
+            pygame.display.flip()
+        pygame.time.delay(delay_ms)
+
+        if (i, j) == (gi, gj):
+            found = True
+            break
+
+        # Expandir vecinos en orden (arriba, abajo, derecha, izquierda)
+        vecinos = [(-1, 0), (1, 0), (0, 1), (0, -1)]
+        # Si hay 'O' en la celda actual, todavía expandimos todos sus vecinos (BFS explora todos)
+        try:
+            raw = recorridos[i][j] if recorridos and i < len(recorridos) else ""
+        except Exception:
+            raw = ""
+        # Para BFS, simplemente encolar todos los vecinos válidos que no hayan sido visitados
+        for di, dj in vecinos:
+            ni, nj = i + di, j + dj
+            if 0 <= ni < len(datos_grid) and 0 <= nj < len(datos_grid[0]):
+                if not visited[ni][nj] and datos_grid[ni][nj] == "1":
+                    visited[ni][nj] = True
+                    parent[(ni, nj)] = (i, j)
+                    q.append((ni, nj))
+                    try:
+                        alg_tree_edges.add(((i, j), (ni, nj)))
+                    except Exception:
+                        pass
+                    globals()["alg_tree_edges"] = alg_tree_edges
+
+    if found:
+        # reconstruir camino
+        path = []
+        cur = (gi, gj)
+        while cur != (si, sj):
+            path.append(cur)
+            cur = parent.get(cur)
+            if cur is None:
+                path = []
+                break
+        if path:
+            path.append((si, sj))
+            path.reverse()
+            alg_path = set(path)
+            globals()["alg_path"] = alg_path
+            # guardar secuencia completa para dibujo y export
+            alg_path_seq = list(path)
+            globals()["alg_path_seq"] = alg_path_seq
+            # animar el camino final con mayor intensidad
+            for step in path:
+                alg_current = step
+                globals()["alg_current"] = alg_current
+                try:
+                    render_frame(screen)
+                except Exception:
+                    pygame.display.flip()
+                pygame.time.delay(delay_ms)
+            aplicar_camino_en_recorridos(path)
+
+    # finalizar animación
+    alg_animating = False
+    alg_current = None
+    alg_frontier = set()
+    globals()["alg_animating"] = alg_animating
+    globals()["alg_current"] = alg_current
+    globals()["alg_frontier"] = alg_frontier
+    globals()["alg_path"] = alg_path
+    return found
+
+
+def dfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
+    global alg_animating, alg_current, alg_frontier, alg_path, alg_tree_edges, alg_path_seq
+    alg_animating = True
+    alg_current = None
+    alg_frontier = set()
+    alg_path = set()
+    globals()["alg_animating"] = alg_animating
+    si, sj = start
+    gi, gj = goal
+    visited = [[False] * len(datos_grid[0]) for _ in range(len(datos_grid))]
+    parent = {}
+    stack = [(si, sj, None)]  # (i,j, parent)
+    visited[si][sj] = True
+    found = False
+    # Prioridad de movimientos solicitada: arriba, abajo, derecha, izquierda
+    prioridad = [(-1, 0), (1, 0), (0, 1), (0, -1)]
+    alg_tree_edges = globals().get("alg_tree_edges", set())
+    alg_path_seq = globals().get("alg_path_seq", [])
+    while stack:
+        i, j, came_from = stack.pop()
+        alg_current = (i, j)
+        # construir frontier set desde stack
+        alg_frontier = set((x, y) for x, y, _ in stack)
+        globals()["alg_current"] = alg_current
+        globals()["alg_frontier"] = alg_frontier
+
+        # Marcar visitado en recorridos (excepto I/F/X)
+        try:
+            actual = recorridos[i][j] if recorridos and i < len(recorridos) else ""
+        except Exception:
+            actual = ""
+        if (
+            actual is not None
+            and "I" not in actual
+            and "F" not in actual
+            and "X" not in actual
+        ):
+            if "V" not in actual:
+                try:
+                    recorridos[i][j] = (actual or "") + "V"
+                except Exception:
+                    pass
+        descubrir_alrededor(descubiertas_laberinto, i, j)
+
+        pygame.event.pump()
+        try:
+            render_frame(screen)
+        except Exception:
+            pygame.display.flip()
+        pygame.time.delay(delay_ms)
+
+        if (i, j) == (gi, gj):
+            found = True
+            break
+
+        # En cada celda (incluyendo O) intentar moverse en orden de prioridad, evitando volver a 'came_from' y celdas ya visitadas
+        moved = False
+        # prioridad ya definida más arriba: [(-1,0),(1,0),(0,1),(0,-1)]
+        # Añadir en orden inverso para que LIFO tome la prioridad correcta
+        for di, dj in reversed(prioridad):
+            ni, nj = i + di, j + dj
+            if 0 <= ni < len(datos_grid) and 0 <= nj < len(datos_grid[0]):
+                if datos_grid[ni][nj] == "1" and not visited[ni][nj]:
+                    # evitar regresar al padre
+                    if came_from and (ni, nj) == came_from:
+                        continue
+                    visited[ni][nj] = True
+                    parent[(ni, nj)] = (i, j)
+                    stack.append((ni, nj, (i, j)))
+                    try:
+                        alg_tree_edges.add(((i, j), (ni, nj)))
+                    except Exception:
+                        pass
+                    globals()["alg_tree_edges"] = alg_tree_edges
+                    moved = True
+        # Si no pudo moverse en prioridad (bloqueado), el stack puede contener otras ramas ya añadidas; DFS seguirá con ellas
+        # Si la celda es O y hay múltiples opciones, el comportamiento sigue la prioridad de movimientos
+
+    if found:
+        path = []
+        cur = (gi, gj)
+        while cur != (si, sj):
+            path.append(cur)
+            cur = parent.get(cur)
+            if cur is None:
+                path = []
+                break
+        if path:
+            path.append((si, sj))
+            path.reverse()
+            alg_path = set(path)
+            globals()["alg_path"] = alg_path
+            alg_path_seq = list(path)
+            globals()["alg_path_seq"] = alg_path_seq
+            for step in path:
+                alg_current = step
+                globals()["alg_current"] = alg_current
+                try:
+                    render_frame(screen)
+                except Exception:
+                    pygame.display.flip()
+                pygame.time.delay(delay_ms)
+            aplicar_camino_en_recorridos(path)
+
+    alg_animating = False
+    alg_current = None
+    alg_frontier = set()
+    globals()["alg_animating"] = alg_animating
+    globals()["alg_current"] = alg_current
+    globals()["alg_frontier"] = alg_frontier
+    globals()["alg_path"] = alg_path
+    return found
 
 
 def abrir_menu_personaje(
@@ -393,6 +690,40 @@ def dibujar_mapa_laberinto(surface, datos_l, recorridos_l):
                                 )
                                 surface.blit(letra_surface, (x + 5 + x_offset, y + 12))
                                 x_offset += letra_surface.get_width() + 2
+            # Dibujar overlay de animación (búsqueda): casilla explorada/frontier/path en verde
+            try:
+                # Dibujar aristas del árbol de búsqueda
+                if alg_tree_edges:
+                    for a, b in alg_tree_edges:
+                        (i1, j1), (i2, j2) = a, b
+                        x1 = j1 * cell_size + cell_size + cell_size // 2
+                        y1 = i1 * cell_size + cell_size + cell_size // 2
+                        x2 = j2 * cell_size + cell_size + cell_size // 2
+                        y2 = i2 * cell_size + cell_size + cell_size // 2
+                # Dibujar aristas del camino final (más fuertes)
+                if alg_path_seq:
+                    for k in range(len(alg_path_seq) - 1):
+                        (i1, j1) = alg_path_seq[k]
+                        (i2, j2) = alg_path_seq[k + 1]
+                        x1 = j1 * cell_size + cell_size + cell_size // 2
+                        y1 = i1 * cell_size + cell_size + cell_size // 2
+                        x2 = j2 * cell_size + cell_size + cell_size // 2
+                        y2 = i2 * cell_size + cell_size + cell_size // 2
+                if alg_animating:
+                    if (i, j) in alg_frontier:
+                        s = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
+                        s.fill((0, 255, 0, 80))
+                        surface.blit(s, (x, y))
+                    if (i, j) == alg_current:
+                        s2 = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
+                        s2.fill((0, 200, 0, 140))
+                        surface.blit(s2, (x, y))
+                    if (i, j) in alg_path:
+                        s3 = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
+                        s3.fill((0, 180, 0, 200))
+                        surface.blit(s3, (x, y))
+            except Exception:
+                pass
     # Líneas
     for x in range(0, cell_size * 16, cell_size):
         pygame.draw.line(surface, (80, 80, 80), (x, 0), (x, cell_size * 16))
@@ -458,6 +789,236 @@ def dibujar_mapa_terreno(surface, datos_t):
         pygame.draw.line(surface, (80, 80, 80), (x, 0), (x, cell_size * 16))
     for y in range(0, cell_size * 16, cell_size):
         pygame.draw.line(surface, (80, 80, 80), (0, y), (cell_size * 16, y))
+
+
+def render_frame(screen):
+    """Dibuja la UI completa en pantalla usando el estado global actual."""
+    # Dibujar UI base botones cargar
+    screen.fill((0, 0, 0))
+    ui_font = pygame.font.Font(None, 32)
+    btn_lab_text = ui_font.render("Cargar Laberinto", True, (255, 255, 255))
+    btn_ter_text = ui_font.render("Cargar Terreno", True, (255, 255, 255))
+    btn_w = max(btn_lab_text.get_width(), btn_ter_text.get_width()) + 40
+    btn_h = btn_lab_text.get_height() + 20
+    panel_x = screen.get_width() - btn_w - 40
+    btn_laberinto_rect = pygame.Rect(panel_x, 20, btn_w, btn_h)
+    btn_terreno_rect = pygame.Rect(panel_x, 20 + btn_h + 20, btn_w, btn_h)
+    interfaces.dibujar_boton(screen, btn_laberinto_rect, (70, 130, 180), btn_lab_text)
+    interfaces.dibujar_boton(screen, btn_terreno_rect, (100, 100, 100), btn_ter_text)
+
+    # Botón Personaje
+    pers_text = (
+        f"Personaje: {personaje_seleccionado if personaje_seleccionado else 'Escoger'}"
+    )
+    pers_surface = ui_font.render(pers_text, True, (255, 255, 255))
+    btn_personaje_rect = pygame.Rect(
+        panel_x, btn_terreno_rect.bottom + 20, btn_w, btn_h
+    )
+    interfaces.dibujar_boton(screen, btn_personaje_rect, (120, 60, 90), pers_surface)
+
+    # Botón Modificar mapa
+    mod_texto = "Modificar: ON" if modificar_mapa else "Modificar: OFF"
+    mod_surface = ui_font.render(mod_texto, True, (255, 255, 255))
+    btn_modificar_rect = pygame.Rect(
+        panel_x, btn_personaje_rect.bottom + 20, btn_w, btn_h
+    )
+    interfaces.dibujar_boton(
+        screen,
+        btn_modificar_rect,
+        (150, 90, 40) if modificar_mapa else (90, 60, 40),
+        mod_surface,
+    )
+
+    # Botón Valores especiales (ahora ambos mapas si alguno cargado)
+    if modo_mapa in ("laberinto", "terreno"):
+        val_texto = f"Valores: {'ON' if modo_valores else 'OFF'}"
+        val_surface = ui_font.render(val_texto, True, (255, 255, 255))
+        btn_valores_rect = pygame.Rect(
+            panel_x, btn_modificar_rect.bottom + 20, btn_w, btn_h
+        )
+        interfaces.dibujar_boton(
+            screen,
+            btn_valores_rect,
+            (180, 140, 30) if modo_valores else (110, 90, 40),
+            val_surface,
+        )
+        estado_base_y = btn_valores_rect.bottom + 20
+    else:
+        estado_base_y = btn_modificar_rect.bottom + 20
+
+    # Botón Cubrir/Descubrir
+    cover_text = "Descubrir: ON" if mostrar_cubierto else "Descubrir: OFF"
+    cover_surface = ui_font.render(cover_text, True, (255, 255, 255))
+    btn_cover_rect = pygame.Rect(panel_x, estado_base_y, btn_w, btn_h)
+    interfaces.dibujar_boton(
+        screen,
+        btn_cover_rect,
+        (40, 120, 160) if mostrar_cubierto else (60, 60, 90),
+        cover_surface,
+    )
+    estado_base_y = btn_cover_rect.bottom + 20
+
+    # Placeholder texto estado
+    estado_font = pygame.font.Font(None, 24)
+    estado_lineas = []
+    estado_lineas.append(
+        f"{modo_mapa or 'Sin mapa'} | {personaje_seleccionado or '-'} | Cost:{costo_acumulado}"
+    )
+    if modo_mapa in ("laberinto", "terreno") and personaje_seleccionado:
+        # Determinar posición actual
+        if modo_mapa == "laberinto":
+            pos_act = obtener_pos_actual_laberinto()
+        else:
+            pos_act = globals().get("pos_terreno", None)
+        if pos_act:
+            i0, j0 = pos_act
+
+            def label_vecino(i, j):
+                if not (0 <= i < 15 and 0 <= j < 15):
+                    return "Fuera"
+                if modo_mapa == "laberinto":
+                    tipo = "Camino" if datos[i][j] == "1" else "Pared"
+                    simb = ""
+                    if (
+                        datos[i][j] == "1"
+                        and recorridos
+                        and 0 <= i < len(recorridos)
+                        and 0 <= j < len(recorridos[0])
+                    ):
+                        simb_raw = recorridos[i][j] or ""
+                        if simb_raw:
+                            partes = []
+                            for c in simb_raw:
+                                if (
+                                    c in SIMBOLOS_DESCRIP
+                                    and SIMBOLOS_DESCRIP[c] not in partes
+                                ):
+                                    partes.append(SIMBOLOS_DESCRIP[c])
+                            if partes:
+                                simb = ",".join(partes)
+                        else:
+                            simb = ""
+                    return f"{tipo}{' '+simb if simb else ''}".strip()
+                else:
+                    try:
+                        t = int(datos[i][j])
+                    except:
+                        return "N/A"
+                    nombres = {
+                        0: "Montaña",
+                        1: "Tierra",
+                        2: "Agua",
+                        3: "Arena",
+                        4: "Bosque",
+                    }
+                    base = nombres.get(t, str(t))
+                    simb = ""
+                    if (
+                        marcas_terreno
+                        and 0 <= i < len(marcas_terreno)
+                        and 0 <= j < len(marcas_terreno[0])
+                    ):
+                        simb_raw = marcas_terreno[i][j] or ""
+                        if simb_raw:
+                            partes = []
+                            for c in simb_raw:
+                                if (
+                                    c in SIMBOLOS_DESCRIP
+                                    and SIMBOLOS_DESCRIP[c] not in partes
+                                ):
+                                    partes.append(SIMBOLOS_DESCRIP[c])
+                            if partes:
+                                simb = ",".join(partes)
+                        else:
+                            simb = ""
+                    return f"{base}{' '+simb if simb else ''}".strip()
+
+            vecinos_info = {
+                "Arriba": label_vecino(i0 - 1, j0),
+                "Abajo": label_vecino(i0 + 1, j0),
+                "Izq": label_vecino(i0, j0 - 1),
+                "Der": label_vecino(i0, j0 + 1),
+            }
+            estado_lineas.append("Vecinos:")
+            for k, v in vecinos_info.items():
+                estado_lineas.append(f" {k}: {v}")
+    if info_celda_click:
+        estado_lineas.append(info_celda_click)
+    # Limitar a 8 líneas máximas
+    estado_lineas = estado_lineas[:8]
+
+    # Vecinos compactos unificados
+    if modo_mapa in ("laberinto", "terreno") and personaje_seleccionado:
+        if modo_mapa == "laberinto":
+            pos_act = obtener_pos_actual_laberinto()
+        else:
+            pos_act = globals().get("pos_terreno", None)
+        if pos_act:
+            i0, j0 = pos_act
+        else:
+            i0 = j0 = 0
+
+        def short_label(i, j):
+            if not (0 <= i < 15 and 0 <= j < 15):
+                return "—"
+            if modo_mapa == "laberinto":
+                base = "C" if datos and datos[i][j] == "1" else "P"
+                simb_raw = ""
+                if (
+                    datos
+                    and datos[i][j] == "1"
+                    and recorridos
+                    and 0 <= i < len(recorridos)
+                    and 0 <= j < len(recorridos[0])
+                ):
+                    simb_raw = recorridos[i][j] or ""
+                orden = ["I", "F", "V", "O", "X"]
+                simb_fil = "".join([c for c in simb_raw if c in orden])
+                return base + (":" + simb_fil if simb_fil else "")
+            else:
+                try:
+                    t = int(datos[i][j])
+                except:
+                    return "?"
+                nombres_c = {0: "M", 1: "T", 2: "Ag", 3: "Ar", 4: "B"}
+                base = nombres_c.get(t, str(t))
+                simb_raw = (
+                    marcas_terreno[i][j]
+                    if (
+                        marcas_terreno
+                        and 0 <= i < len(marcas_terreno)
+                        and 0 <= j < len(marcas_terreno[0])
+                    )
+                    else ""
+                )
+                orden = ["I", "F", "V", "O", "X"]
+                simb_fil = "".join([c for c in simb_raw if c in orden])
+                return base + (":" + simb_fil if simb_fil else "")
+
+        vecinos_compacto = f"A:{short_label(i0-1,j0)} B:{short_label(i0+1,j0)} I:{short_label(i0,j0-1)} D:{short_label(i0,j0+1)}"
+        estado_lineas = [l for l in estado_lineas if not l.startswith("A:")]
+        estado_lineas.append(vecinos_compacto)
+    estado_lineas = estado_lineas[:8]
+
+    for li, linea in enumerate(estado_lineas):
+        esurf = estado_font.render(linea, True, (255, 255, 0))
+        screen.blit(esurf, (panel_x, estado_base_y + li * 14))
+
+    # Dibujo grid base y mapa
+    dibujar_grid_base(screen)
+    if modo_mapa == "laberinto":
+        dibujar_mapa_laberinto(screen, datos, recorridos)
+    elif modo_mapa == "terreno":
+        dibujar_mapa_terreno(screen, datos)
+        pos_t = globals().get("pos_terreno", None)
+        if pos_t:
+            px = pos_t[1] * cell_size + cell_size
+            py = pos_t[0] * cell_size + cell_size
+            pygame.draw.circle(
+                screen, (255, 120, 0), (px + cell_size // 2, py + cell_size // 2), 10
+            )
+
+    pygame.display.flip()
 
 
 # Inicializar Pygame solo si no estaba
@@ -730,6 +1291,51 @@ while running:
                                             descubrir_alrededor(
                                                 descubiertas_terreno, 0, 0
                                             )
+
+                # Permitir ejecutar búsquedas en el laberinto con F5 (BFS) y F6 (DFS)
+                # Solo cuando hay un personaje seleccionado y estamos en modo laberinto
+                try:
+                    if (
+                        event.key == pygame.K_F5
+                        and modo_mapa == "laberinto"
+                        and personaje_seleccionado
+                        and recorridos
+                    ):
+                        start = obtener_pos_actual_laberinto()
+                        goal = None
+                        for i_g in range(len(recorridos)):
+                            for j_g in range(len(recorridos[0])):
+                                if recorridos[i_g][j_g] and "F" in recorridos[i_g][j_g]:
+                                    goal = (i_g, j_g)
+                                    break
+                            if goal:
+                                break
+                        if start and goal:
+                            # Ejecutar versión animada (bloqueante en UI, con pequeño delay)
+                            bfs_laberinto_animado(
+                                start, goal, datos, screen, delay_ms=100
+                            )
+                    elif (
+                        event.key == pygame.K_F6
+                        and modo_mapa == "laberinto"
+                        and personaje_seleccionado
+                        and recorridos
+                    ):
+                        start = obtener_pos_actual_laberinto()
+                        goal = None
+                        for i_g in range(len(recorridos)):
+                            for j_g in range(len(recorridos[0])):
+                                if recorridos[i_g][j_g] and "F" in recorridos[i_g][j_g]:
+                                    goal = (i_g, j_g)
+                                    break
+                            if goal:
+                                break
+                        if start and goal:
+                            dfs_laberinto_animado(
+                                start, goal, datos, screen, delay_ms=100
+                            )
+                except Exception:
+                    pass
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             x, y = event.pos
