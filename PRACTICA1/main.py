@@ -1,9 +1,6 @@
 import pygame
 import funciones
 import interfaces
-import os
-import json
-import sys
 
 # Paletas y constantes (asegurar antes de funciones)
 COLOR_PARED = (74, 74, 74)
@@ -65,8 +62,278 @@ alg_path = globals().get("alg_path", set())
 alg_tree_edges = globals().get("alg_tree_edges", set())
 alg_path_seq = globals().get("alg_path_seq", [])
 
+# Tipo de algoritmo actual (para diferenciar visualmente BFS/DFS)
+alg_type = globals().get("alg_type", None)
+
 # Nueva variable para mostrar celdas cubiertas
 mostrar_cubierto = globals().get("mostrar_cubierto", False)
+
+# Visualización de árbol de decisiones y ruta ideal
+show_tree = globals().get("show_tree", False)
+tree_node_pos = globals().get("tree_node_pos", {})  # (i,j) -> (x,y)
+tree_edges_cached = globals().get("tree_edges_cached", set())  # set(((i,j),(ni,nj)))
+route_ideal = globals().get("route_ideal", [])  # [((i,j), dirCode)]
+# Toast flotante para mostrar la ruta ideal automáticamente tras la búsqueda
+route_toast = globals().get("route_toast", None)  # dict con title, cells, dirs
+route_toast_until = globals().get(
+    "route_toast_until", 0
+)  # pygame.time.get_ticks() límite
+
+
+def cell_name(i, j):
+    try:
+        return f"{chr(ord('A')+j)}{i+1}"
+    except Exception:
+        return f"({i},{j})"
+
+
+def dir_code(from_cell, to_cell):
+    (i, j), (ni, nj) = from_cell, to_cell
+    di, dj = ni - i, nj - j
+    if di == -1 and dj == 0:
+        return "A"  # Arriba
+    if di == 1 and dj == 0:
+        return "B"  # Abajo
+    if di == 0 and dj == -1:
+        return "I"  # Izquierda
+    if di == 0 and dj == 1:
+        return "D"  # Derecha
+
+
+def build_tree_from_edges(root, edges):
+    from collections import defaultdict
+
+    tree = defaultdict(list)
+    for a, b in edges:
+        tree[a].append(b)
+    # Asegurar root existe aunque no tenga hijos
+    if root not in tree:
+        tree[root] = []
+    return tree
+
+
+def compute_levels_positions(root, tree, area, node_radius=12):
+    # area: (x,y,w,h). Compute BFS levels and spread nodes per level.
+    from collections import deque, defaultdict
+
+    x0, y0, w, h = area
+    levels = defaultdict(list)
+    level_of = {root: 0}
+    q = deque([root])
+    seen = {root}
+    while q:
+        # Permitir interacción básica durante la animación (botones Árbol/Ruta/Cubrir, salir)
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                globals()["running"] = False
+                alg_animating = False
+                globals()["alg_animating"] = alg_animating
+                return False
+            elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                # Cancelar/abortar animación
+                alg_animating = False
+                globals()["alg_animating"] = alg_animating
+                return False
+            elif ev.type == pygame.MOUSEBUTTONDOWN:
+                x, y = ev.pos
+                _btn_tree = globals().get("btn_tree_rect")
+                if _btn_tree and _btn_tree.collidepoint(x, y):
+                    globals()["show_tree"] = not globals().get("show_tree", False)
+                _btn_route = globals().get("btn_route_rect")
+                if _btn_route and _btn_route.collidepoint(x, y):
+                    globals()["show_route"] = not globals().get("show_route", False)
+                _btn_cover = globals().get("btn_cover_rect")
+                if _btn_cover and _btn_cover.collidepoint(x, y):
+                    globals()["mostrar_cubierto"] = not globals().get(
+                        "mostrar_cubierto", False
+                    )
+        u = q.popleft()
+        lvl = level_of[u]
+        levels[lvl].append(u)
+        for v in tree.get(u, []):
+            if v not in seen:
+                seen.add(v)
+                level_of[v] = lvl + 1
+                q.append(v)
+    max_level = max(levels.keys()) if levels else 0
+    pos = {}
+    for lvl in range(0, max_level + 1):
+        nodes = levels.get(lvl, [])
+        n = max(1, len(nodes))
+        y = y0 + (h * (lvl + 1) // (max_level + 2))
+        for idx, node in enumerate(nodes):
+            x = x0 + (w * (idx + 1) // (n + 1))
+            pos[node] = (x, y)
+    return pos
+
+
+def prepare_tree_visual():
+    # Usa alg_tree_edges y alg_path_seq actuales para preparar posiciones y ruta ideal
+    global tree_node_pos, tree_edges_cached, route_ideal
+    if not alg_tree_edges:
+        return False
+    # Encontrar root desde 'I' en recorridos o usar primer punto del path
+    root = None
+    try:
+        for i in range(min(15, len(recorridos))):
+            for j in range(min(15, len(recorridos[0]))):
+                if recorridos[i][j] and "I" in recorridos[i][j]:
+                    root = (i, j)
+                    break
+            if root:
+                break
+    except Exception:
+        root = None
+    if root is None:
+        root = alg_path_seq[0] if alg_path_seq else None
+    if root is None:
+        return False
+    # Construir árbol dirigido desde edges
+    tree_edges_cached = set(alg_tree_edges)
+    tree = build_tree_from_edges(root, tree_edges_cached)
+    # Layout en el área del grid (izquierda)
+    grid_area = (10, 50, 620, 540)
+    tree_node_pos = compute_levels_positions(root, tree, grid_area)
+    # Calcular ruta ideal (lista de (cell_name, dir))
+    rlist = []
+    if alg_path_seq and len(alg_path_seq) > 1:
+        for idx in range(len(alg_path_seq) - 1):
+            a = alg_path_seq[idx]
+            b = alg_path_seq[idx + 1]
+            rlist.append((cell_name(*a), dir_code(a, b)))
+    route_ideal = rlist
+    globals()["tree_node_pos"] = tree_node_pos
+    globals()["tree_edges_cached"] = tree_edges_cached
+    globals()["route_ideal"] = route_ideal
+    return True
+
+
+def draw_decision_tree(surface):
+    if not tree_node_pos or not tree_edges_cached:
+        return
+    # Fondo translúcido
+    overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 160))
+    surface.blit(overlay, (0, 0))
+    # Título con tipo de algoritmo
+    title = f"Árbol {alg_type}" if alg_type else "Árbol"
+    tfont = pygame.font.Font(None, 28)
+    title_surf = tfont.render(title, True, (255, 255, 255))
+    title_bg = pygame.Surface(
+        (title_surf.get_width() + 16, title_surf.get_height() + 10), pygame.SRCALPHA
+    )
+    title_bg.fill((20, 20, 20, 180))
+    surface.blit(title_bg, (12, 12))
+    surface.blit(title_surf, (20, 17))
+    # Dibujar edges (primero)
+    path_edges = set()
+    if alg_path_seq and len(alg_path_seq) > 1:
+        for idx in range(len(alg_path_seq) - 1):
+            path_edges.add((alg_path_seq[idx], alg_path_seq[idx + 1]))
+    base_edge_color = (150, 220, 120) if alg_type == "BFS" else (200, 150, 240)
+    path_edge_color = (70, 130, 200)
+    for a, b in tree_edges_cached:
+        if a in tree_node_pos and b in tree_node_pos:
+            color = path_edge_color if (a, b) in path_edges else base_edge_color
+            width = 4 if (a, b) in path_edges else 3
+            pygame.draw.line(surface, color, tree_node_pos[a], tree_node_pos[b], width)
+    # Dibujar nodos
+    fnode = pygame.font.Font(None, 15)
+    node_radius = 11  # radios más pequeño para reducir solapamiento visual
+    outline_w = 2
+    for node, (x, y) in tree_node_pos.items():
+        pygame.draw.circle(surface, (30, 30, 30), (x, y), node_radius)
+        pygame.draw.circle(surface, (220, 220, 220), (x, y), node_radius, outline_w)
+        label = cell_name(*node)
+        txt = fnode.render(label, True, (255, 255, 255))
+        # Centrar el texto exactamente en el centro del nodo
+        txt_rect = txt.get_rect(center=(x, y))
+        surface.blit(txt, txt_rect)
+    # Dibujar etiquetas de dirección al final, con offset para evitar superponer nodos
+    for a, b in tree_edges_cached:
+        if a not in tree_node_pos or b not in tree_node_pos:
+            continue
+        ax, ay = tree_node_pos[a]
+        bx, by = tree_node_pos[b]
+        vx, vy = (bx - ax, by - ay)
+        length = max(1.0, (vx * vx + vy * vy) ** 0.5)
+        ux, uy = (vx / length, vy / length)  # unit along edge
+        nx, ny = (-uy, ux)  # perpendicular unit
+        # posición a lo largo de la arista, sesgada para alejarse de los nodos
+        t = 0.58
+        px = ax + ux * (length * t)
+        py = ay + uy * (length * t)
+
+        # si está muy cerca de un nodo, alejar un poco más
+        def dist2(x1, y1, x2, y2):
+            dx, dy = x1 - x2, y1 - y2
+            return dx * dx + dy * dy
+
+        node_r = node_radius + 3
+        if dist2(px, py, ax, ay) < (node_r * node_r):
+            t = 0.68
+            px = ax + ux * (length * t)
+            py = ay + uy * (length * t)
+        if dist2(px, py, bx, by) < (node_r * node_r):
+            t = 0.42
+            px = ax + ux * (length * t)
+            py = ay + uy * (length * t)
+        d = dir_code(a, b)
+        f = pygame.font.Font(None, 15)
+        label_s = f.render(d, True, (255, 230, 0))
+        # fondo semitransparente para legibilidad
+        bg_w, bg_h = label_s.get_width() + 8, label_s.get_height() + 4
+        bg = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 140))
+        # contorno ligero
+        outline_f = pygame.font.Font(None, 15)
+        outline_s = outline_f.render(d, True, (0, 0, 0))
+        # colocar
+        bx0 = int(px - bg_w / 2)
+        by0 = int(py - bg_h / 2)
+        surface.blit(bg, (bx0, by0))
+        for dx in (-1, 1):
+            for dy in (-1, 1):
+                surface.blit(outline_s, (bx0 + 4 + dx, by0 + 2 + dy))
+        surface.blit(label_s, (bx0 + 4, by0 + 2))
+
+
+def draw_route_toast(surface):
+    """Muestra un mensaje flotante temporal con la ruta ideal al terminar la búsqueda."""
+    if not route_toast or pygame.time.get_ticks() > route_toast_until:
+        return
+    width, height = surface.get_size()
+    margin = 10
+    font_title = pygame.font.Font(None, 28)
+    font_body = pygame.font.Font(None, 24)
+    title = route_toast.get("title", "Ruta ideal")
+    cells = route_toast.get("cells", [])
+    dirs = route_toast.get("dirs", [])
+
+    # Construir líneas compactas (una para celdas, otra para direcciones)
+    cells_str = " ".join(cells)
+    dirs_str = " ".join(dirs) if dirs else ""
+    ts = font_title.render(title, True, (255, 255, 255))
+    cs = font_body.render(cells_str, True, (255, 230, 0))
+    ds = font_body.render(dirs_str, True, (180, 180, 255)) if dirs_str else None
+
+    box_w = (
+        max(ts.get_width(), cs.get_width(), ds.get_width() if ds else 0) + 2 * margin
+    )
+    box_h = (
+        ts.get_height() + cs.get_height() + (ds.get_height() if ds else 0) + 3 * margin
+    )
+    # Posición flotante arriba-izquierda del grid
+    bx, by = 10, 10
+    panel = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+    panel.fill((0, 0, 0, 180))
+    panel.blit(ts, (margin, margin))
+    panel.blit(cs, (margin, margin + ts.get_height() + 4))
+    if ds:
+        panel.blit(ds, (margin, margin + ts.get_height() + 4 + cs.get_height() + 2))
+    # Borde
+    pygame.draw.rect(panel, (200, 200, 200), panel.get_rect(), 1)
+    surface.blit(panel, (bx, by))
 
 
 def reset_estado_descubrimiento():
@@ -261,14 +528,21 @@ def aplicar_camino_en_recorridos(path):
 
 # Versión animada de BFS que actualiza globals para que la UI muestre progreso
 def bfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
-    global alg_animating, alg_current, alg_frontier, alg_path, alg_tree_edges, alg_path_seq
+    global alg_animating, alg_current, alg_frontier, alg_path, alg_tree_edges, alg_path_seq, alg_type
     from collections import deque
 
     alg_animating = True
     alg_current = None
     alg_frontier = set()
     alg_path = set()
+    # Tipo de algoritmo y reinicio de estructuras de árbol
+    alg_type = "BFS"
+    alg_tree_edges = set()
+    alg_path_seq = []
     globals()["alg_animating"] = alg_animating
+    globals()["alg_type"] = alg_type
+    globals()["alg_tree_edges"] = alg_tree_edges
+    globals()["alg_path_seq"] = alg_path_seq
 
     si, sj = start
     gi, gj = goal
@@ -280,9 +554,7 @@ def bfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
     found = False
     # marcar inicio como descubierto (no marcar V sobre I)
     globals()["alg_frontier"] = set(q)
-    # inicializar conjunto de aristas
-    alg_tree_edges = globals().get("alg_tree_edges", set())
-    alg_path_seq = globals().get("alg_path_seq", [])
+    # conjuntos ya reiniciados más arriba
     while q:
         i, j = q.popleft()
         alg_current = (i, j)
@@ -369,6 +641,21 @@ def bfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
                     pygame.display.flip()
                 pygame.time.delay(delay_ms)
             aplicar_camino_en_recorridos(path)
+            # Configurar toast de ruta por 6 segundos
+            try:
+                cells = [cell_name(*p) for p in path]
+                dirs = []
+                for idx in range(len(path) - 1):
+                    dirs.append(dir_code(path[idx], path[idx + 1]))
+                title = f"Ruta ideal ({alg_type})"
+                globals()["route_toast"] = {
+                    "title": title,
+                    "cells": cells,
+                    "dirs": dirs,
+                }
+                globals()["route_toast_until"] = pygame.time.get_ticks() + 6000
+            except Exception:
+                pass
 
     # finalizar animación
     alg_animating = False
@@ -378,16 +665,27 @@ def bfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
     globals()["alg_current"] = alg_current
     globals()["alg_frontier"] = alg_frontier
     globals()["alg_path"] = alg_path
+    try:
+        prepare_tree_visual()
+    except Exception:
+        pass
     return found
 
 
 def dfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
-    global alg_animating, alg_current, alg_frontier, alg_path, alg_tree_edges, alg_path_seq
+    global alg_animating, alg_current, alg_frontier, alg_path, alg_tree_edges, alg_path_seq, alg_type
     alg_animating = True
     alg_current = None
     alg_frontier = set()
     alg_path = set()
+    # Tipo de algoritmo y reinicio de estructuras de árbol
+    alg_type = "DFS"
+    alg_tree_edges = set()
+    alg_path_seq = []
     globals()["alg_animating"] = alg_animating
+    globals()["alg_type"] = alg_type
+    globals()["alg_tree_edges"] = alg_tree_edges
+    globals()["alg_path_seq"] = alg_path_seq
     si, sj = start
     gi, gj = goal
     visited = [[False] * len(datos_grid[0]) for _ in range(len(datos_grid))]
@@ -400,6 +698,30 @@ def dfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
     alg_tree_edges = globals().get("alg_tree_edges", set())
     alg_path_seq = globals().get("alg_path_seq", [])
     while stack:
+        # Permitir interacción básica durante la animación (botones Árbol/Ruta/Cubrir, salir)
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                globals()["running"] = False
+                alg_animating = False
+                globals()["alg_animating"] = alg_animating
+                return False
+            elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                alg_animating = False
+                globals()["alg_animating"] = alg_animating
+                return False
+            elif ev.type == pygame.MOUSEBUTTONDOWN:
+                x, y = ev.pos
+                _btn_tree = globals().get("btn_tree_rect")
+                if _btn_tree and _btn_tree.collidepoint(x, y):
+                    globals()["show_tree"] = not globals().get("show_tree", False)
+                _btn_route = globals().get("btn_route_rect")
+                if _btn_route and _btn_route.collidepoint(x, y):
+                    globals()["show_route"] = not globals().get("show_route", False)
+                _btn_cover = globals().get("btn_cover_rect")
+                if _btn_cover and _btn_cover.collidepoint(x, y):
+                    globals()["mostrar_cubierto"] = not globals().get(
+                        "mostrar_cubierto", False
+                    )
         i, j, came_from = stack.pop()
         alg_current = (i, j)
         # construir frontier set desde stack
@@ -484,6 +806,21 @@ def dfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
                     pygame.display.flip()
                 pygame.time.delay(delay_ms)
             aplicar_camino_en_recorridos(path)
+            # Configurar toast de ruta por 6 segundos
+            try:
+                cells = [cell_name(*p) for p in path]
+                dirs = []
+                for idx in range(len(path) - 1):
+                    dirs.append(dir_code(path[idx], path[idx + 1]))
+                title = f"Ruta ideal ({alg_type})"
+                globals()["route_toast"] = {
+                    "title": title,
+                    "cells": cells,
+                    "dirs": dirs,
+                }
+                globals()["route_toast_until"] = pygame.time.get_ticks() + 6000
+            except Exception:
+                pass
 
     alg_animating = False
     alg_current = None
@@ -492,6 +829,10 @@ def dfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
     globals()["alg_current"] = alg_current
     globals()["alg_frontier"] = alg_frontier
     globals()["alg_path"] = alg_path
+    try:
+        prepare_tree_visual()
+    except Exception:
+        pass
     return found
 
 
@@ -858,6 +1199,20 @@ def render_frame(screen):
     )
     estado_base_y = btn_cover_rect.bottom + 20
 
+    # Botón Árbol de decisiones
+    tree_text = f"Árbol: {'ON' if show_tree else 'OFF'}"
+    tree_surface = ui_font.render(tree_text, True, (255, 255, 255))
+    btn_tree_rect = pygame.Rect(panel_x, estado_base_y, btn_w, btn_h)
+    interfaces.dibujar_boton(
+        screen,
+        btn_tree_rect,
+        (60, 160, 80) if show_tree else (60, 60, 60),
+        tree_surface,
+    )
+    estado_base_y = btn_tree_rect.bottom + 20
+
+    # (Ruta ideal ya no tiene botón; se muestra como toast al terminar búsquedas)
+
     # Placeholder texto estado
     estado_font = pygame.font.Font(None, 24)
     estado_lineas = []
@@ -998,6 +1353,7 @@ def render_frame(screen):
         vecinos_compacto = f"A:{short_label(i0-1,j0)} B:{short_label(i0+1,j0)} I:{short_label(i0,j0-1)} D:{short_label(i0,j0+1)}"
         estado_lineas = [l for l in estado_lineas if not l.startswith("A:")]
         estado_lineas.append(vecinos_compacto)
+    # (Ruta ideal larga se mostrará en un toast; no ocupar panel)
     estado_lineas = estado_lineas[:8]
 
     for li, linea in enumerate(estado_lineas):
@@ -1017,6 +1373,12 @@ def render_frame(screen):
             pygame.draw.circle(
                 screen, (255, 120, 0), (px + cell_size // 2, py + cell_size // 2), 10
             )
+
+    # Dibujar árbol de decisiones si está activado
+    if show_tree:
+        draw_decision_tree(screen)
+    # Dibujar toast de ruta si está activo
+    draw_route_toast(screen)
 
     pygame.display.flip()
 
@@ -1339,14 +1701,26 @@ while running:
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             x, y = event.pos
-            if "btn_cover_rect" in globals() and btn_cover_rect.collidepoint(x, y):
+            _btn_cover = globals().get("btn_cover_rect")
+            if _btn_cover and _btn_cover.collidepoint(x, y):
                 mostrar_cubierto = not mostrar_cubierto
                 globals()["mostrar_cubierto"] = mostrar_cubierto
                 continue
+            _btn_tree = globals().get("btn_tree_rect")
+            if _btn_tree and _btn_tree.collidepoint(x, y):
+                show_tree = not show_tree
+                globals()["show_tree"] = show_tree
+                # Si se activa y no hay preparación previa, intenta preparar con estado actual
+                if show_tree and (not tree_node_pos or not tree_edges_cached):
+                    try:
+                        prepare_tree_visual()
+                    except Exception:
+                        pass
+                continue
+            # (Ruta: botón eliminado, se muestra como toast)
             # Detectar clicks en botones de carga
-            if "btn_laberinto_rect" in globals() and btn_laberinto_rect.collidepoint(
-                x, y
-            ):
+            _btn_lab = globals().get("btn_laberinto_rect")
+            if _btn_lab and _btn_lab.collidepoint(x, y):
                 cargar_laberinto()
                 # Restaurar a snapshot inicial (evitar acumulación)
                 if recorridos_inicial is not None:
@@ -1358,31 +1732,31 @@ while running:
                     )
                 modo_valores = False
                 globals()["modo_valores"] = modo_valores
-            elif "btn_terreno_rect" in globals() and btn_terreno_rect.collidepoint(
-                x, y
-            ):
+            elif globals().get("btn_terreno_rect") and globals()[
+                "btn_terreno_rect"
+            ].collidepoint(x, y):
                 cargar_terreno()
                 modo_valores = False
                 globals()["modo_valores"] = modo_valores
-            elif "btn_personaje_rect" in globals() and btn_personaje_rect.collidepoint(
-                x, y
-            ):
+            elif globals().get("btn_personaje_rect") and globals()[
+                "btn_personaje_rect"
+            ].collidepoint(x, y):
                 # Abrir menú modal y luego continuar sin propagar el clic
                 abrir_menu_personaje(
                     screen, panel_x, btn_personaje_rect, btn_w, personajes, modo_mapa
                 )
-            elif "btn_modificar_rect" in globals() and btn_modificar_rect.collidepoint(
-                x, y
-            ):
+            elif globals().get("btn_modificar_rect") and globals()[
+                "btn_modificar_rect"
+            ].collidepoint(x, y):
                 modificar_mapa = not modificar_mapa
                 if modificar_mapa:
                     modo_valores = False
                 globals()["modificar_mapa"] = modificar_mapa
                 globals()["modo_valores"] = modo_valores
             elif (
-                "btn_valores_rect" in globals()
+                globals().get("btn_valores_rect")
                 and modo_mapa == "laberinto"
-                and btn_valores_rect.collidepoint(x, y)
+                and globals()["btn_valores_rect"].collidepoint(x, y)
             ):
                 modo_valores = not modo_valores
                 if modo_valores:
@@ -1390,9 +1764,9 @@ while running:
                 globals()["modo_valores"] = modo_valores
                 globals()["modificar_mapa"] = modificar_mapa
             # Nueva condición para botón valores en terreno
-            elif "btn_valores_rect" in globals() and btn_valores_rect.collidepoint(
-                x, y
-            ):
+            elif globals().get("btn_valores_rect") and globals()[
+                "btn_valores_rect"
+            ].collidepoint(x, y):
                 modo_valores = not modo_valores
                 if modo_valores:
                     modificar_mapa = False
@@ -2047,6 +2421,18 @@ while running:
     )
     estado_base_y = btn_cover_rect.bottom + 20
 
+    # Botón Árbol de decisiones
+    tree_text = f"Árbol: {'ON' if show_tree else 'OFF'}"
+    tree_surface = ui_font.render(tree_text, True, (255, 255, 255))
+    btn_tree_rect = pygame.Rect(panel_x, estado_base_y, btn_w, btn_h)
+    interfaces.dibujar_boton(
+        screen,
+        btn_tree_rect,
+        (60, 160, 80) if show_tree else (60, 60, 60),
+        tree_surface,
+    )
+    estado_base_y = btn_tree_rect.bottom + 20
+
     # Placeholder texto estado
     estado_font = pygame.font.Font(None, 24)
     estado_lineas = []
@@ -2208,6 +2594,16 @@ while running:
             pygame.draw.circle(
                 screen, (255, 120, 0), (px + cell_size // 2, py + cell_size // 2), 10
             )
+
+    # Dibujar árbol de decisiones si está activado
+    if show_tree:
+        draw_decision_tree(screen)
+
+    # Dibujar toast de ruta si está activo
+    try:
+        draw_route_toast(screen)
+    except Exception:
+        pass
 
     pygame.display.flip()
 
