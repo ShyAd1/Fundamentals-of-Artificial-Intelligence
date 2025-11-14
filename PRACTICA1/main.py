@@ -73,6 +73,8 @@ show_tree = globals().get("show_tree", False)
 tree_node_pos = globals().get("tree_node_pos", {})  # (i,j) -> (x,y)
 tree_edges_cached = globals().get("tree_edges_cached", set())  # set(((i,j),(ni,nj)))
 route_ideal = globals().get("route_ideal", [])  # [((i,j), dirCode)]
+# Métricas por nodo para A*: (d, c, h)
+astar_node_metrics = globals().get("astar_node_metrics", {})
 # Toast flotante para mostrar la ruta ideal automáticamente tras la búsqueda
 route_toast = globals().get("route_toast", None)  # dict con title, cells, dirs
 route_toast_until = globals().get(
@@ -239,16 +241,28 @@ def draw_decision_tree(surface):
             pygame.draw.line(surface, color, tree_node_pos[a], tree_node_pos[b], width)
     # Dibujar nodos
     fnode = pygame.font.Font(None, 15)
+    fmetrics = pygame.font.Font(None, 13)
     node_radius = 11  # radios más pequeño para reducir solapamiento visual
     outline_w = 2
     for node, (x, y) in tree_node_pos.items():
         pygame.draw.circle(surface, (30, 30, 30), (x, y), node_radius)
         pygame.draw.circle(surface, (220, 220, 220), (x, y), node_radius, outline_w)
-        label = cell_name(*node)
-        txt = fnode.render(label, True, (255, 255, 255))
-        # Centrar el texto exactamente en el centro del nodo
-        txt_rect = txt.get_rect(center=(x, y))
-        surface.blit(txt, txt_rect)
+        name = cell_name(*node)
+        # Si es A* y tenemos métricas, mostrar name arriba y métricas abajo
+        if alg_type == "A*" and node in globals().get("astar_node_metrics", {}):
+            d, c, h = globals()["astar_node_metrics"][node]
+            name_s = fnode.render(name, True, (255, 255, 255))
+            metrics_s = fmetrics.render(f"d={d} c={c} h={h}", True, (255, 230, 0))
+            # Ajustar posiciones: nombre ligeramente arriba, métricas abajo
+            name_rect = name_s.get_rect(center=(x, y - 8))
+            metrics_rect = metrics_s.get_rect(center=(x, y + 8))
+            surface.blit(name_s, name_rect)
+            surface.blit(metrics_s, metrics_rect)
+        else:
+            txt = fnode.render(name, True, (255, 255, 255))
+            # Centrar el texto exactamente en el centro del nodo
+            txt_rect = txt.get_rect(center=(x, y))
+            surface.blit(txt, txt_rect)
     # Dibujar etiquetas de dirección al final, con offset para evitar superponer nodos
     for a, b in tree_edges_cached:
         if a not in tree_node_pos or b not in tree_node_pos:
@@ -344,6 +358,41 @@ def reset_estado_descubrimiento():
     globals()["mostrar_cubierto"] = mostrar_cubierto
 
 
+def reset_algorithm_state():
+    """Limpia el estado de visualización/animación de algoritmos para evitar
+    que caminos/overlays permanezcan tras reiniciar o recargar mapas."""
+    global alg_animating, alg_current, alg_frontier, alg_path
+    global alg_tree_edges, alg_path_seq, astar_node_metrics
+    global tree_node_pos, tree_edges_cached, route_ideal
+    global route_toast, route_toast_until
+
+    alg_animating = False
+    alg_current = None
+    alg_frontier = set()
+    alg_path = set()
+    alg_tree_edges = set()
+    alg_path_seq = []
+    astar_node_metrics = {}
+    tree_node_pos = {}
+    tree_edges_cached = set()
+    route_ideal = []
+    route_toast = None
+    route_toast_until = 0
+
+    globals()["alg_animating"] = alg_animating
+    globals()["alg_current"] = alg_current
+    globals()["alg_frontier"] = alg_frontier
+    globals()["alg_path"] = alg_path
+    globals()["alg_tree_edges"] = alg_tree_edges
+    globals()["alg_path_seq"] = alg_path_seq
+    globals()["astar_node_metrics"] = astar_node_metrics
+    globals()["tree_node_pos"] = tree_node_pos
+    globals()["tree_edges_cached"] = tree_edges_cached
+    globals()["route_ideal"] = route_ideal
+    globals()["route_toast"] = route_toast
+    globals()["route_toast_until"] = route_toast_until
+
+
 def cargar_laberinto():
     global datos, recorridos, modo_mapa, copy_recorridos, costo_acumulado, recorridos_inicial
     datos = funciones.leer_archivo_csv("PRACTICA1/laberinto.csv")
@@ -355,6 +404,8 @@ def cargar_laberinto():
     costo_acumulado = 0
     globals()["costo_acumulado"] = costo_acumulado
     reset_estado_descubrimiento()
+    # Limpiar estado de algoritmos/overlays al recargar
+    reset_algorithm_state()
     globals()["modo_mapa"] = modo_mapa
 
 
@@ -386,6 +437,8 @@ def cargar_terreno():
     costo_acumulado = 0
     globals()["costo_acumulado"] = costo_acumulado
     reset_estado_descubrimiento()
+    # Limpiar estado de algoritmos/overlays al recargar
+    reset_algorithm_state()
     globals()["modo_mapa"] = modo_mapa
 
 
@@ -836,6 +889,228 @@ def dfs_laberinto_animado(start, goal, datos_grid, screen, delay_ms=120):
     return found
 
 
+def astar_terreno_animado(start, goal, datos_grid, screen, delay_ms=120):
+    """A* adaptado al mapa de terreno. Usa costos desde `costos_terreno` según `personaje_seleccionado`.
+    Guarda en `astar_node_metrics` tuplas (d, c, h) por nodo y en `alg_tree_edges` las aristas exploradas.
+    """
+    global alg_animating, alg_current, alg_frontier, alg_path, alg_tree_edges, alg_path_seq, alg_type, astar_node_metrics
+    import heapq
+
+    alg_animating = True
+    alg_current = None
+    alg_frontier = set()
+    alg_path = set()
+    alg_tree_edges = set()
+    alg_path_seq = []
+    astar_node_metrics = {}
+
+    alg_type = "A*"
+    globals()["alg_animating"] = alg_animating
+    globals()["alg_type"] = alg_type
+    globals()["alg_tree_edges"] = alg_tree_edges
+    globals()["alg_path_seq"] = alg_path_seq
+    globals()["astar_node_metrics"] = astar_node_metrics
+
+    si, sj = start
+    gi, gj = goal
+
+    # personaje y costos
+    personaje = globals().get("personaje_seleccionado") or (
+        personajes[0] if personajes else "Humano"
+    )
+    costos_personaje = costos_terreno.get(personaje, {})
+
+    def terrain_cost(i, j):
+        import math
+
+        try:
+            val = datos_grid[i][j]
+            tc = int(val)
+        except Exception:
+            return None
+        # Intentar obtener coste declarado para este personaje
+        raw = None
+        if tc in costos_personaje:
+            raw = costos_personaje[tc]
+        elif str(tc) in costos_personaje:
+            raw = costos_personaje[str(tc)]
+        if raw is None:
+            # Sin coste declarado -> no se puede atravesar
+            return None
+        try:
+            v = float(raw)
+            if math.isnan(v):
+                return None
+            return v
+        except Exception:
+            return None
+
+    def heuristic(a, b):
+        (i, j), (ii, jj) = a, b
+        # Manhattan distance
+        return abs(ii - i) + abs(jj - j)
+
+    open_heap = []
+    counter = 0
+    gscore = {start: 0}
+    fscore = {start: heuristic(start, goal)}
+    heapq.heappush(open_heap, (fscore[start], counter, start))
+    parent = {}
+    found = False
+
+    while open_heap and globals().get("running", True):
+        # construir frontier set para mostrar
+        alg_frontier = set([n for _, _, n in open_heap])
+        globals()["alg_frontier"] = alg_frontier
+
+        _, _, current = heapq.heappop(open_heap)
+        alg_current = current
+        globals()["alg_current"] = alg_current
+
+        # actualizar métricas para nodo actual
+        dcur = heuristic(current, goal)
+        ccur = gscore.get(current, 0)
+        astar_node_metrics[current] = (dcur, ccur, dcur + ccur)
+        globals()["astar_node_metrics"] = astar_node_metrics
+
+        # establecer coordenadas actuales
+        i, j = current
+        # Marcar visitado en recorridos/terreno (para animación tipo BFS/DFS)
+        try:
+            actual = (
+                recorridos[i][j]
+                if recorridos and i < len(recorridos) and j < len(recorridos[0])
+                else ""
+            )
+        except Exception:
+            actual = ""
+        if (
+            actual is not None
+            and "I" not in actual
+            and "F" not in actual
+            and "X" not in actual
+        ):
+            if "V" not in actual:
+                try:
+                    recorridos[i][j] = (actual or "") + "V"
+                except Exception:
+                    pass
+        # marcar alrededor como descubierto (terreno)
+        try:
+            descubrir_alrededor(descubiertas_terreno, i, j)
+        except Exception:
+            pass
+
+        # UI
+        pygame.event.pump()
+        try:
+            render_frame(screen)
+        except Exception:
+            pygame.display.flip()
+        pygame.time.delay(delay_ms)
+
+        if current == goal:
+            found = True
+            break
+
+        # vecinos (arriba, abajo, derecha, izquierda)
+        for di, dj in [(-1, 0), (1, 0), (0, 1), (0, -1)]:
+            ni, nj = i + di, j + dj
+            if not (0 <= ni < len(datos_grid) and 0 <= nj < len(datos_grid[0])):
+                continue
+            # Solo caminar en celdas válidas (asumir no pared si existe datos_grid)
+            try:
+                cell = datos_grid[ni][nj]
+            except Exception:
+                cell = "1"
+            # Calcular costo de entrar en (ni,nj)
+            move_cost = terrain_cost(ni, nj)
+            if move_cost is None:
+                # impasable para este personaje
+                continue
+            tentative_g = gscore.get(current, 0) + move_cost
+            neighbor = (ni, nj)
+            if tentative_g < gscore.get(neighbor, float("inf")):
+                parent[neighbor] = current
+                gscore[neighbor] = tentative_g
+                f = tentative_g + heuristic(neighbor, goal)
+                counter += 1
+                heapq.heappush(open_heap, (f, counter, neighbor))
+                # guardar arista explorada
+                alg_tree_edges.add((current, neighbor))
+                globals()["alg_tree_edges"] = alg_tree_edges
+                # actualizar métricas
+                astar_node_metrics[neighbor] = (
+                    heuristic(neighbor, goal),
+                    tentative_g,
+                    heuristic(neighbor, goal) + tentative_g,
+                )
+                globals()["astar_node_metrics"] = astar_node_metrics
+
+    # Si encontramos, reconstruir camino
+    if found:
+        path = []
+        cur = goal
+        while cur != start:
+            path.append(cur)
+            cur = parent.get(cur)
+            if cur is None:
+                break
+        if cur == start:
+            path.append(start)
+            path.reverse()
+            alg_path = set(path)
+            globals()["alg_path"] = alg_path
+            alg_path_seq = list(path)
+            globals()["alg_path_seq"] = alg_path_seq
+            # animar el camino final rápidamente
+            for step in path:
+                globals()["alg_current"] = step
+                try:
+                    render_frame(screen)
+                except Exception:
+                    pygame.display.flip()
+                pygame.time.delay(max(20, delay_ms // 2))
+            # aplicar en recorridos y sumar costo real del terreno
+            aplicar_camino_en_recorridos(path)
+            # sumar costos reales en costo_acumulado (usar terrain_cost)
+            total_cost = 0
+            for idx in range(len(path) - 1):
+                ni, nj = path[idx + 1]
+                total_cost += terrain_cost(ni, nj)
+            globals()["costo_acumulado"] = (
+                globals().get("costo_acumulado", 0) + total_cost
+            )
+            # configurar toast
+            try:
+                cells = [cell_name(*p) for p in path]
+                dirs = []
+                for idx in range(len(path) - 1):
+                    dirs.append(dir_code(path[idx], path[idx + 1]))
+                globals()["route_toast"] = {
+                    "title": "Ruta A*",
+                    "cells": cells,
+                    "dirs": dirs,
+                }
+                globals()["route_toast_until"] = pygame.time.get_ticks() + 6000
+            except Exception:
+                pass
+
+    # finalizar
+    alg_animating = False
+    alg_current = None
+    alg_frontier = set()
+    globals()["alg_animating"] = alg_animating
+    globals()["alg_current"] = alg_current
+    globals()["alg_frontier"] = alg_frontier
+    globals()["alg_path"] = alg_path
+    try:
+        prepare_tree_visual()
+    except Exception:
+        pass
+    return found
+
+
 def abrir_menu_personaje(
     screen, panel_x, btn_personaje_rect, btn_w, personajes, modo_mapa
 ):
@@ -1125,6 +1400,29 @@ def dibujar_mapa_terreno(surface, datos_t):
                             letra_surface = letra_font.render(letra, True, letra_color)
                             surface.blit(letra_surface, (x + 5 + x_offset, y + 12))
                             x_offset += letra_surface.get_width() + 2
+            # Overlays para mostrar estado de búsqueda (frontier, current, path)
+            try:
+                af = globals().get("alg_frontier", set()) or set()
+                ac = globals().get("alg_current", None)
+                ap = globals().get("alg_path", set()) or set()
+                coord = (i, j)
+                if coord in ap:
+                    # camino final: rojo oscuro translúcido
+                    s3 = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
+                    s3.fill((180, 30, 30, 170))
+                    surface.blit(s3, (x, y))
+                elif ac == coord:
+                    # nodo actual: rojo brillante
+                    s2 = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
+                    s2.fill((255, 80, 60, 200))
+                    surface.blit(s2, (x, y))
+                elif coord in af:
+                    # frontier: rojo más claro/translúcido
+                    s1 = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
+                    s1.fill((200, 80, 80, 140))
+                    surface.blit(s1, (x, y))
+            except Exception:
+                pass
     # Líneas
     for x in range(0, cell_size * 16, cell_size):
         pygame.draw.line(surface, (80, 80, 80), (x, 0), (x, cell_size * 16))
@@ -1696,6 +1994,34 @@ while running:
                             dfs_laberinto_animado(
                                 start, goal, datos, screen, delay_ms=100
                             )
+                    # Ejecutar A* en terreno con F7
+                    elif (
+                        event.key == pygame.K_F7
+                        and modo_mapa == "terreno"
+                        and personaje_seleccionado
+                    ):
+                        start = globals().get("pos_terreno", None)
+                        goal = None
+                        try:
+                            for i_g in range(len(recorridos)):
+                                for j_g in range(len(recorridos[0])):
+                                    if (
+                                        recorridos[i_g][j_g]
+                                        and "F" in recorridos[i_g][j_g]
+                                    ):
+                                        goal = (i_g, j_g)
+                                        break
+                                if goal:
+                                    break
+                        except Exception:
+                            goal = None
+                        if start and goal:
+                            try:
+                                astar_terreno_animado(
+                                    start, goal, datos, screen, delay_ms=100
+                                )
+                            except Exception:
+                                pass
                 except Exception:
                     pass
 
