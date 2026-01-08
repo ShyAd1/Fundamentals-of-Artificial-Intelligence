@@ -1,0 +1,320 @@
+================================================================================
+SISTEMA DE CLASIFICADORES K-NN Y MÍNIMA DISTANCIA
+Fundamentos de IA - Enero 2026
+================================================================================
+
+✓ SISTEMA COMPLETAMENTE FUNCIONAL Y PROBADO
+
+================================================================================
+REQUISITOS CUMPLIDOS
+================================================================================
+
+1. REQUISITOS GENERALES
+   ✓ Define tamaño de vectores de entrada y salida
+   ✓ Permite introducir valores para vectores de entrada/salida
+   ✓ Entrena a partir de archivos de texto plano
+
+2. CLASIFICADOR K-NN
+   ✓ Aprende usando K-NN
+   ✓ Elige entre distancia euclidiana y Manhattan
+   ✓ Especifica valor de K
+
+3. CLASIFICADOR MÍNIMA DISTANCIA
+   ✓ Aprende usando mínima distancia
+   ✓ Elige entre distancia euclidiana y Manhattan
+
+================================================================================
+ESTRUCTURA DEL PROYECTO
+================================================================================
+
+/Users/elxanto/Desktop/ESCUELA/FUNDAMENTOS DE IA/ML P2/
+│
+├── main.py                             # Interfaz interactiva principal
+├── examples.py                         # Ejemplos de uso
+├── README.md                           # Documentación completa
+├── RESUMEN.txt                         # Este archivo
+│
+├── src/                                # Código fuente
+│   ├── __init__.py
+│   ├── dataset.py                      # Gestión de datasets
+│   ├── distance_metrics.py             # Métricas de distancia
+│   ├── knn_classifier.py               # Clasificador K-NN
+│   └── minimum_distance_classifier.py  # Clasificador Mínima Distancia
+│
+├── data/                               # Datos de entrenamiento
+│   ├── training_data.txt               # Dataset Iris de ejemplo
+│   └── custom_data.txt                 # Generado automáticamente
+│
+└── tests/                              # Pruebas
+    ├── test_system.py                  # Suite de pruebas
+    └── test_data.txt                   # Datos generados en pruebas
+
+================================================================================
+CÓMO USAR
+================================================================================
+
+1. INTERFAZ INTERACTIVA (RECOMENDADO)
+   
+   $ cd "/Users/elxanto/Desktop/ESCUELA/FUNDAMENTOS DE IA/ML P2"
+   $ python3 main.py
+   
+   Menú principal:
+   1. Configuración       - Establecer tamaños entrada/salida
+   2. Datos             - Cargar/agregar datos
+   3. Entrenamiento     - Entrenar clasificadores
+   4. Predicción        - Realizar predicciones
+   5. Configuración     - Ajustar parámetros
+   6. Estadísticas      - Ver información
+   7. Salir
+
+2. EJEMPLOS DE USO
+
+   $ python3 examples.py
+   
+   Ejecuta 6 ejemplos diferentes demostrando:
+   - Clasificación simple
+   - Dataset Iris
+   - Métricas de distancia
+   - Guardar/cargar datos
+   - Predicciones por lotes
+   - Comparación de clasificadores
+
+3. PRUEBAS DEL SISTEMA
+
+   $ python3 tests/test_system.py
+   
+   Ejecuta pruebas para validar:
+   - Métricas de distancia
+   - Gestión de datasets
+   - Clasificador K-NN
+   - Clasificador Mínima Distancia
+   - Dataset Iris completo
+
+================================================================================
+FORMATO DE ARCHIVO DE DATOS
+================================================================================
+
+Formato de texto plano con separador |
+
+Ejemplo:
+    5.1,3.5,1.4,0.2 | 0
+    7.0,3.2,4.7,1.4 | 1
+    6.3,3.3,6.0,2.5 | 2
+
+Características:
+- Separador entrada/salida: |
+- Separador valores: ,
+- Líneas que comienzan con # son comentarios
+- Las líneas vacías se ignoran
+
+================================================================================
+API DE PROGRAMACIÓN
+================================================================================
+
+EJEMPLO BÁSICO:
+
+from src.dataset import Dataset
+from src.knn_classifier import KNNClassifier
+from src.minimum_distance_classifier import MinimumDistanceClassifier
+
+# 1. Crear y cargar dataset
+ds = Dataset(input_size=4, output_size=1)
+ds.load_from_file('data/training_data.txt')
+
+# 2. Crear clasificadores
+knn = KNNClassifier(ds, k=3, distance_metric='euclidean')
+md = MinimumDistanceClassifier(ds, distance_metric='euclidean')
+
+# 3. Realizar predicciones
+pred_knn = knn.predict([5.1, 3.5, 1.4, 0.2])
+pred_md = md.predict([5.1, 3.5, 1.4, 0.2])
+
+print(f"K-NN: {pred_knn}")
+print(f"MD: {pred_md}")
+
+CLASES PRINCIPALES:
+
+Dataset:
+  - add_sample(input_vector, output_vector)
+  - load_from_file(filepath)
+  - save_to_file(filepath)
+  - get_samples(), get_size(), clear()
+
+KNNClassifier:
+  - predict(input_vector)
+  - predict_batch(input_vectors)
+  - set_k(k)
+  - set_distance_metric(metric)
+  - get_info()
+
+MinimumDistanceClassifier:
+  - predict(input_vector)
+  - predict_batch(input_vectors)
+  - set_distance_metric(metric)
+  - get_prototypes_count()
+  - get_info()
+
+DistanceMetrics:
+  - euclidean(point1, point2)
+  - manhattan(point1, point2)
+  - get_distance_function(metric_name)
+
+================================================================================
+CARACTERÍSTICAS TÉCNICAS
+================================================================================
+
+K-NN (K-Nearest Neighbors):
+  • Algoritmo: Clasificación por k vecinos más cercanos
+  • Complejidad temporal: O(n*d) por predicción
+  • Complejidad espacial: O(n*d)
+  • K ajustable: 1 a N (tamaño del dataset)
+  • Métricas: Euclidiana, Manhattan
+  • Predicción: Promedia salidas de k vecinos
+
+Mínima Distancia:
+  • Algoritmo: Clasificación por prototipo más cercano
+  • Complejidad temporal: O(k*d) por predicción
+  • Complejidad espacial: O(k*d)
+  • Prototipos: Calculados automáticamente
+  • Métricas: Euclidiana, Manhattan
+  • Predicción: Retorna salida del prototipo más cercano
+
+================================================================================
+EJEMPLO DE SESIÓN INTERACTIVA
+================================================================================
+
+$ python3 main.py
+
+SISTEMA DE CLASIFICADORES
+1. Configuración
+2. Datos
+...
+
+Opción: 1
+
+Configuración de Dataset
+============================================================
+Dimensión del vector de entrada: 4
+Dimensión del vector de salida: 1
+
+✓ Dataset configurado: Dataset(entrada=4, salida=1, muestras=0)
+
+Opción: 2
+
+GESTIÓN DE DATOS
+...
+Opción: 2
+
+Cargar Dataset desde Archivo
+Ruta del archivo [data/training_data.txt]: 
+
+✓ Dataset cargado: 9 muestras
+
+Opción: 3
+
+Entrenamiento de Clasificadores
+Valor de K para K-NN [3]: 3
+
+Métricas de distancia disponibles:
+  1. Euclidiana
+  2. Manhattan
+Seleccione métrica [1]: 1
+
+✓ K-NN entrenado: KNN(k=3, métrica=euclidean, muestras=9)
+✓ Mínima Distancia entrenado: MinimumDistance(métrica=euclidean, clases=3)
+  Clases detectadas: 3
+
+Opción: 4
+
+Predicción Individual
+Ingrese un vector de entrada con 4 valores
+Vector de entrada (separados por coma): 5.1,3.5,1.4,0.2
+
+----------------------------------------
+K-NN:              [0.0]
+Mínima Distancia:  [0.0]
+----------------------------------------
+
+================================================================================
+VALIDACIÓN Y PRUEBAS
+================================================================================
+
+Todas las pruebas pasadas correctamente:
+
+✓ Prueba 1: Métricas de Distancia
+  - Distancia euclidiana: CORRECTA
+  - Distancia manhattan: CORRECTA
+
+✓ Prueba 2: Dataset
+  - Agregar muestras: CORRECTO
+  - Guardar/cargar: CORRECTO
+
+✓ Prueba 3: Clasificador K-NN
+  - Predicción: CORRECTA
+  - Cambio de parámetros: CORRECTO
+
+✓ Prueba 4: Clasificador Mínima Distancia
+  - Predicción: CORRECTA
+  - Detección de clases: CORRECTO
+
+✓ Prueba 5: Dataset Iris
+  - Carga de datos: CORRECTA
+  - Ambos clasificadores: CORRECTO
+
+Resultado final: 5/5 pruebas pasadas ✓
+
+================================================================================
+NOTAS IMPORTANTES
+================================================================================
+
+1. NORMALIZACIÓN: Para mejores resultados, normaliza los datos antes de usar.
+
+2. VALOR DE K: 
+   - K pequeño (1-3): Menos suavizado, más sensible a ruido
+   - K grande (>5): Más suavizado, puede perder detalles
+
+3. MÉTRICAS:
+   - Euclidiana: Mejor para espacios continuos
+   - Manhattan: Mejor para datos en grid o urbanos
+
+4. CLASES EN MÍNIMA DISTANCIA:
+   - Se detectan automáticamente según salidas únicas
+   - Cada clase tiene un prototipo (centroide)
+
+5. ENTRENAMIENTO:
+   - Sin parámetros que ajustar, es instantáneo
+   - K-NN: No requiere entrenamiento explícito
+   - Mínima Distancia: Calcula prototipos en construcción
+
+6. ARCHIVOS:
+   - Codificación: UTF-8
+   - Ruta relativa: Desde la carpeta del proyecto
+
+================================================================================
+REQUISITOS DEL SISTEMA
+================================================================================
+
+• Python 3.7 o superior
+• SIN dependencias externas
+• Espacio disco: ~100 KB
+• RAM mínimo: 10 MB
+
+Comando para verificar Python:
+$ python3 --version
+
+================================================================================
+CONTACTO Y DOCUMENTACIÓN
+================================================================================
+
+Ver README.md para documentación detallada
+Ver examples.py para más ejemplos de uso
+Ver src/*.py para comentarios del código
+
+================================================================================
+FIN DEL RESUMEN
+================================================================================
+
+Sistema completamente funcional y listo para usar.
+Todas las características requeridas implementadas y probadas.
+
+Fecha: 7 de enero de 2026
