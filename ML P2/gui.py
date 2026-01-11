@@ -14,17 +14,17 @@ from src.minimum_distance_classifier import MinimumDistanceClassifier
 
 
 class ClassifierGUI:
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root):
         self.root = root
         self.root.title("Clasificadores K-NN y Mínima Distancia")
         self.root.geometry("880x620")
-        self.dataset: Dataset | None = None
-        self.knn: KNNClassifier | None = None
-        self.md: MinimumDistanceClassifier | None = None
+        self.dataset = None
+        self.knn = None
+        self.md = None
 
         self._build_ui()
 
-    def _build_ui(self) -> None:
+    def _build_ui(self):
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
 
@@ -53,7 +53,7 @@ class ClassifierGUI:
         self.log.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
         self.root.rowconfigure(2, weight=1)
 
-    def _setup_tab(self, frame: ttk.Frame) -> None:
+    def _setup_tab(self, frame):
         frame.columnconfigure(1, weight=1)
         ttk.Label(frame, text="Dimensión entrada:").grid(row=0, column=0, sticky="w", pady=5, padx=5)
         ttk.Label(frame, text="Dimensión salida:").grid(row=1, column=0, sticky="w", pady=5, padx=5)
@@ -67,7 +67,7 @@ class ClassifierGUI:
         self.lbl_dataset_info = ttk.Label(frame, text="Dataset no configurado")
         self.lbl_dataset_info.grid(row=3, column=0, columnspan=2, sticky="w", pady=5, padx=5)
 
-    def _data_tab(self, frame: ttk.Frame) -> None:
+    def _data_tab(self, frame):
         frame.columnconfigure(1, weight=1)
         ttk.Label(frame, text="Cargar desde archivo (.txt)").grid(row=0, column=0, sticky="w", pady=5, padx=5)
         ttk.Button(frame, text="Seleccionar archivo", command=self._load_file).grid(row=0, column=1, sticky="w", pady=5, padx=5)
@@ -85,7 +85,7 @@ class ClassifierGUI:
 
         ttk.Button(frame, text="Agregar muestra", command=self._add_manual_sample).grid(row=5, column=0, columnspan=2, pady=10)
 
-    def _train_tab(self, frame: ttk.Frame) -> None:
+    def _train_tab(self, frame):
         frame.columnconfigure(1, weight=1)
         ttk.Label(frame, text="Métrica de distancia:").grid(row=0, column=0, sticky="w", pady=5, padx=5)
         self.combo_metric = ttk.Combobox(frame, values=["euclidean", "manhattan"], state="readonly")
@@ -101,7 +101,7 @@ class ClassifierGUI:
         self.lbl_train_info = ttk.Label(frame, text="Clasificadores no entrenados")
         self.lbl_train_info.grid(row=3, column=0, columnspan=2, sticky="w", pady=5, padx=5)
 
-    def _predict_tab(self, frame: ttk.Frame) -> None:
+    def _predict_tab(self, frame):
         frame.columnconfigure(1, weight=1)
         ttk.Label(frame, text="Vector de entrada (separado por comas)").grid(row=0, column=0, sticky="w", pady=5, padx=5)
         self.entry_predict = ttk.Entry(frame)
@@ -113,7 +113,7 @@ class ClassifierGUI:
         self.lbl_pred_knn.grid(row=2, column=0, columnspan=2, sticky="w", pady=5, padx=5)
         self.lbl_pred_md.grid(row=3, column=0, columnspan=2, sticky="w", pady=5, padx=5)
 
-    def _create_dataset(self) -> None:
+    def _create_dataset(self):
         try:
             input_size = int(self.entry_input_size.get())
             output_size = int(self.entry_output_size.get())
@@ -130,7 +130,7 @@ class ClassifierGUI:
         self.lbl_train_info.config(text="Clasificadores no entrenados")
         self._log(f"Dataset creado con entrada={input_size}, salida={output_size}")
 
-    def _load_file(self) -> None:
+    def _load_file(self):
         if self.dataset is None:
             messagebox.showwarning("Atención", "Primero crea un dataset (dimensiones).")
             return
@@ -145,7 +145,7 @@ class ClassifierGUI:
         except Exception as e:
             messagebox.showerror("Error al cargar", str(e))
 
-    def _add_manual_sample(self) -> None:
+    def _add_manual_sample(self):
         if self.dataset is None:
             messagebox.showwarning("Atención", "Primero crea un dataset (dimensiones).")
             return
@@ -160,7 +160,7 @@ class ClassifierGUI:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    def _train_classifiers(self) -> None:
+    def _train_classifiers(self):
         if self.dataset is None or self.dataset.get_size() == 0:
             messagebox.showwarning("Atención", "Carga o agrega datos antes de entrenar.")
             return
@@ -174,7 +174,7 @@ class ClassifierGUI:
         except Exception as e:
             messagebox.showerror("Error en entrenamiento", str(e))
 
-    def _predict(self) -> None:
+    def _predict(self):
         if self.dataset is None or self.knn is None or self.md is None:
             messagebox.showwarning("Atención", "Primero entrena los clasificadores.")
             return
@@ -188,14 +188,14 @@ class ClassifierGUI:
         except Exception as e:
             messagebox.showerror("Error en predicción", str(e))
 
-    def _log(self, text: str) -> None:
+    def _log(self, text):
         self.log.configure(state="normal")
         self.log.insert(tk.END, text + "\n")
         self.log.see(tk.END)
         self.log.configure(state="disabled")
 
 
-def main() -> None:
+def main():
     root = tk.Tk()
     ClassifierGUI(root)
     root.mainloop()
